@@ -148,6 +148,11 @@ pub struct RouteOptions {
     /// Freerouting 2.4.1's code) and added vias; without it the starter board routes
     /// with no track under its class width and fewer vias (D-017).
     pub fanout: bool,
+    /// The best this many orders (by the router's numbers) are finished (pours, stitching)
+    /// and DRC-checked; the best-ranked one with no open DRC item is kept, else the one
+    /// with the fewest. 0 keeps the router's best unchecked. Each check takes ~15 s
+    /// (they run at once).
+    pub drc_checks: usize,
     /// Add vias tying this net's pours together after routing.
     pub stitch_net: Option<String>,
     /// mm grid for stitching vias.
@@ -171,6 +176,7 @@ impl Default for RouteOptions {
             tries: 8,
             parallel: 4,
             fanout: false,
+            drc_checks: 3,
             stitch_net: Some("GND".into()),
             stitch_pitch: 3.0,
             stitch_via: (0.6, 0.3),

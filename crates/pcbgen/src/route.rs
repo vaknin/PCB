@@ -13,7 +13,7 @@ use regex::Regex;
 
 use crate::board::Board;
 use crate::gates::fill_zones;
-use crate::layout::RouteOptions;
+use crate::layout::{RouteOptions, Waiver};
 use crate::sexpr::{Sexp, dumps, parse};
 use crate::{dsn, node, project, ses, stitch, uid};
 
@@ -43,8 +43,9 @@ fn hole_clearance(pro: &Path) -> f64 {
         .unwrap_or(0.25)
 }
 
-/// Export DSN, run Freerouting, import SES, fill, stitch, fill.
-pub fn route(pcb: &Path, opts: &RouteOptions) -> Result<()> {
+/// Export DSN, run Freerouting on several footprint orders, then finish (SES tracks,
+/// fill, stitch, fill) and DRC-check the best few and keep the best that passes.
+pub fn route(pcb: &Path, opts: &RouteOptions, waivers: &[Waiver]) -> Result<()> {
     let fr = freerouting();
     if !fr.exists() {
         bail!("{} missing; run scripts/fetch-tools.sh", fr.display());
@@ -57,7 +58,6 @@ pub fn route(pcb: &Path, opts: &RouteOptions) -> Result<()> {
             std::fs::remove_dir_all(e.path())?;
         }
     }
-    let name = board_name(pcb);
 
     // drop earlier routing so re-runs start clean; locked tracks (escape stubs) stay
     let mut root = load(pcb)?;
@@ -95,42 +95,122 @@ pub fn route(pcb: &Path, opts: &RouteOptions) -> Result<()> {
     // failed orders were reported as they finished
     let mut tries: Vec<Try> = results.into_iter().filter_map(|(_, r)| r.ok()).collect();
     tries.sort_by_key(|t| t.seed);
-    // ties go to the lowest order (min_by keeps the first)
-    let Some(best) = tries.iter().min_by(|a, b| a.key().cmp(&b.key())) else {
+    if tries.is_empty() {
         bail!("every Freerouting run failed; see {}/try-*/freerouting.log", work.display());
+    }
+    // best first by the router's own numbers; ties go to the lower order
+    let mut ranked: Vec<usize> = (0..tries.len()).collect();
+    ranked.sort_by_key(|&i| (tries[i].key(), tries[i].seed));
+
+    // Finish the best few (tracks, pours, stitching) each in its own folder and run KiCad's
+    // DRC on them: the router's numbers can't see e.g. a track starving a pour's thermal
+    // spokes. Keep the best-ranked one DRC passes, else the one with the fewest open items.
+    let n = opts.drc_checks.min(ranked.len());
+    let kept = if n == 0 {
+        finish(pcb, &root, &tries[ranked[0]], opts)?.iter().for_each(|l| println!("{l}"));
+        ranked[0]
+    } else {
+        println!("drc: finishing the best {n} orders and checking each");
+        let checked: Vec<(usize, Result<Checked>)> = std::thread::scope(|s| {
+            let handles: Vec<_> = ranked[..n]
+                .iter()
+                .map(|&i| {
+                    let (t, root) = (&tries[i], &root);
+                    s.spawn(move || (i, check_try(pcb, root, t, opts, waivers)))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().expect("check thread panicked")).collect()
+        });
+        let mut logs = vec![];
+        for (i, r) in checked {
+            match r {
+                Ok((open, log)) => {
+                    println!("drc: order {}: {} open item(s){}", tries[i].seed, open.len(), open.first().map_or(String::new(), |o| format!(", e.g. {o}")));
+                    tries[i].drc_open = Some(open.len());
+                    logs.push((i, open.len(), log));
+                }
+                Err(e) => println!("drc: order {}: check failed: {e:#}", tries[i].seed),
+            }
+        }
+        let Some(k) = pick(&logs.iter().map(|l| l.1).collect::<Vec<_>>()) else { bail!("no checked order could be finished") };
+        let (i, open, log) = logs.swap_remove(k);
+        for l in log {
+            println!("{l}");
+        }
+        if open > 0 {
+            println!("drc: WARNING: every checked order has open DRC items; the check stage will fail. Check more orders (--tries, RouteOptions::drc_checks) or change the placement");
+        }
+        std::fs::copy(tries[i].dir.join("check").join(pcb.file_name().unwrap()), pcb)?;
+        i
     };
+    let best = &tries[kept];
     println!("freerouting: kept order {} of {} ({:.0} s in all): {}", best.seed, tries.len(), t0.elapsed().as_secs_f64(), best.summary());
     if !best.unrouted.is_empty() {
         println!(
-            "freerouting: WARNING: every order left connections unrouted; the check stage will fail. Route more orders \
+            "freerouting: WARNING: the kept order left connections unrouted; the check stage will fail. Route more orders \
              (--tries), or give the router room (placement, net-class widths)"
         );
     }
-    // the winner's files where a reader expects them
+    // the kept order's files where a reader expects them
     for f in ["board.dsn", "board.ses", "freerouting.log"] {
         std::fs::copy(best.dir.join(f), work.join(f))?;
     }
     let summary = serde_json::json!({
         "kept_order": best.seed,
-        "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest",
+        "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest; of the best `drc_checks` orders, finished and checked, the first with no open DRC item, else the fewest",
         "orders": tries.iter().map(Try::json).collect::<Vec<_>>(),
     });
     std::fs::write(work.join("tries.json"), serde_json::to_string_pretty(&summary)? + "\n")?;
-    let (tracks, routed_vias) = (&best.tracks, &best.vias);
+    Ok(())
+}
 
-    println!("routed: {} track segments, {} vias", tracks.len(), routed_vias.len());
-    for (i, t) in tracks.iter().enumerate() {
+/// Of checked orders in rank order, given their open DRC item counts: the first with
+/// none, else the first with the fewest.
+fn pick(open: &[usize]) -> Option<usize> {
+    (0..open.len()).min_by_key(|&k| (open[k], k))
+}
+
+/// A checked order: (open DRC items, the finishing log).
+type Checked = (Vec<String>, Vec<String>);
+
+/// Finish one order's routing in `<try>/check/` (a copy of the project) and run the DRC
+/// gate there: (open items, the finishing log).
+fn check_try(pcb: &Path, root: &Sexp, t: &Try, opts: &RouteOptions, waivers: &[Waiver]) -> Result<Checked> {
+    let dir = t.dir.join("check");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let src = pcb.parent().unwrap();
+    let name = board_name(pcb);
+    // what DRC reads besides the board: rules, net classes, the schematic (parity) and the
+    // library tables (their paths are absolute)
+    for f in [format!("{name}.kicad_sch"), format!("{name}.kicad_pro"), format!("{name}.kicad_dru"), "fp-lib-table".into(), "sym-lib-table".into()] {
+        if src.join(&f).exists() {
+            std::fs::copy(src.join(&f), dir.join(&f))?;
+        }
+    }
+    let board = dir.join(pcb.file_name().unwrap());
+    let log = finish(&board, root, t, opts)?;
+    Ok((crate::gates::drc_open(&dir, &name, waivers)?, log))
+}
+
+/// Put one order's tracks and vias on `root` (the board with only its locked tracks), save
+/// it at `pcb`, fill, stitch, fill. Returns the log lines.
+fn finish(pcb: &Path, root: &Sexp, t: &Try, opts: &RouteOptions) -> Result<Vec<String>> {
+    let name = board_name(pcb);
+    let mut root = root.clone();
+    let mut log = vec![format!("routed: {} track segments, {} vias", t.tracks.len(), t.vias.len())];
+    for (i, tr) in t.tracks.iter().enumerate() {
         root.push(node!(
             "segment",
-            node!("start", t.start.x, t.start.y),
-            node!("end", t.end.x, t.end.y),
-            node!("width", t.width),
-            node!("layer", &t.layer),
-            node!("net", &t.net),
+            node!("start", tr.start.x, tr.start.y),
+            node!("end", tr.end.x, tr.end.y),
+            node!("width", tr.width),
+            node!("layer", &tr.layer),
+            node!("net", &tr.net),
             node!("uuid", uid(&name, &["track", &i.to_string()]))
         ));
     }
-    for (i, v) in routed_vias.iter().enumerate() {
+    for (i, v) in t.vias.iter().enumerate() {
         root.push(via_node(&name, &format!("route/{i}"), v.at, v.size, v.drill, &v.net));
     }
     save(pcb, &root)?;
@@ -142,8 +222,9 @@ pub fn route(pcb: &Path, opts: &RouteOptions) -> Result<()> {
         let mut root = load(pcb)?; // zones come filled by kicad-cli
         let mut board = Board::from_sexp(&root)?;
         for (net, pitch) in nets {
-            let added = stitch::stitch(&board, opts, &net, pitch);
-            println!("stitching: {} {net} vias", added.len());
+            let (added, notes) = stitch::stitch(&board, opts, &net, pitch);
+            log.extend(notes);
+            log.push(format!("stitching: {} {net} vias", added.len()));
             for (i, p) in added.into_iter().enumerate() {
                 let (d, h) = opts.stitch_via;
                 root.push(via_node(&name, &format!("stitch/{net}/{i}"), p, d, h, &net));
@@ -153,7 +234,7 @@ pub fn route(pcb: &Path, opts: &RouteOptions) -> Result<()> {
         save(pcb, &root)?;
         fill_zones(pcb)?;
     }
-    Ok(())
+    Ok(log)
 }
 
 pub fn via_node(board: &str, key: &str, at: crate::geom::Pt, size: f64, drill: f64, net: &str) -> Sexp {
@@ -184,6 +265,8 @@ pub struct Try {
     /// Freerouting's own clearance-violation count (KiCad's DRC is the gate).
     pub fr_violations: Option<usize>,
     pub secs: f64,
+    /// Open DRC items once finished, for the orders that were checked.
+    pub drc_open: Option<usize>,
 }
 
 impl Try {
@@ -221,6 +304,7 @@ impl Try {
             "vias": self.vias.len(),
             "track_length_mm": r1(self.length_mm),
             "freerouting_clearance_violations": self.fr_violations,
+            "drc_open": self.drc_open,
         })
     }
 }
@@ -287,6 +371,7 @@ fn run_try(fr: &Path, board: &Board, rules: &project::BoardRules, hole_clearance
         pour_unrouted: pour.iter().map(|p| p.1).sum(),
         fr_violations,
         secs: t0.elapsed().as_secs_f64(),
+        drc_open: None,
     })
 }
 
@@ -361,7 +446,16 @@ The following connections could not be routed -- please review your design:
             length_mm: len,
             fr_violations: None,
             secs: 0.0,
+            drc_open: None,
         }
+    }
+
+    #[test]
+    fn picks_first_clean_order() {
+        assert_eq!(pick(&[2, 0, 0]), Some(1));
+        assert_eq!(pick(&[0, 0]), Some(0));
+        assert_eq!(pick(&[3, 1, 1]), Some(1));
+        assert_eq!(pick(&[]), None);
     }
 
     /// Unrouted first, then the pour net, then necked-down track, vias, length.

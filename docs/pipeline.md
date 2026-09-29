@@ -12,13 +12,13 @@ Why this shape: `DECISIONS.md` D-004, D-005, D-010 and D-016 (the Rust port, no 
 ```
 cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [--out DIR] [--tries N]
 ```
-With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and `DIR/fab` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each).
+With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and `DIR/fab` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each); checking the best 3 adds ~10 s.
 
 | Stage | Does | Output |
 |---|---|---|
 | sch | writes `.kicad_pro` + `.kicad_dru` (fab rules), then the schematic; refuses if any pin is neither connected nor marked nc; then the netlist round-trip and net-class gates | `kicad/<name>.kicad_sch` |
 | pcb | exports the netlist from the schematic, loads footprints, places them from the layout, adds outline, GND pours, local copper zones (`CopperZone`), labels, escape stubs; `kicad-cli pcb upgrade --force` re-saves it | `kicad/<name>.kicad_pcb` |
-| route | deletes old unlocked tracks → DSN written by pcbgen (pours hidden from the router) → Freerouting on 8 footprint orders, 4 at a time, fanout off; the best is kept (fewest unrouted, then least track under class width, fewest vias, shortest) → SES read back → kicad-cli zone fill → stitching vias (GND, plus `stitch_local` nets) → fill | same file; the winner's work files in `kicad/route/`, each order's in `route/try-<n>/`, scores in `route/tries.json` |
+| route | deletes old unlocked tracks → DSN written by pcbgen (pours hidden from the router) → Freerouting on 8 footprint orders, 4 at a time, fanout off; ranked by fewest unrouted, then least track under class width, fewest vias, shortest → the best 3 are each finished (SES tracks, kicad-cli zone fill, stitching vias for GND and `stitch_local` nets, fill) and DRC-checked in `route/try-<n>/check/`; the best-ranked one with no open DRC item is kept, else the one with the fewest (D-019) | same file; the winner's work files in `kicad/route/`, each order's in `route/try-<n>/`, scores in `route/tries.json` |
 | check | netlist round trip, net-class patterns, ERC, DRC (JLCPCB rules, schematic parity), routing report; fails on any error, unwaived warning, unrouted connection or copper in a keep-out | `kicad/reports/{erc,drc,routing}.json` |
 | fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections (bottom side: 180 − angle, as kicad-jlcpcb-tools); lists parts whose rotation is UNVERIFIED, and every bottom-side part | `fab/` (see `fab/README.md`) |
 
@@ -45,7 +45,7 @@ With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and
 - `src/layout.rs`: `layout() -> Layout` with
   - `rules`: net classes (`NetClass::new(name, track, clearance, via_dia, via_drill).patterns(..)`).
   - `spec`: board size, `places` (every reference: `at(x, y)`, `at_rot(x, y, deg)` or `at_bottom(x, y, deg)` for the back side, mm from the top-left with Y down; a bottom part's angle is the one KiCad shows, D-018), silk `Text` labels, and `CopperZone`s (local pours of one net, e.g. regulator cooling copper; filled above GND).
-  - `route`: Freerouting and stitching options (`RouteOptions`: `tries`, `parallel`, `fanout`, stitching).
+  - `route`: Freerouting and stitching options (`RouteOptions`: `tries`, `parallel`, `fanout`, `drc_checks`, stitching).
   - `waivers`: `Waiver { kind, substring, reason }` entries.
 - Generated: `kicad/` and `fab/`.
 - Modified footprints go in `lib/footprints/<Lib>.pretty` (repo root); the `sch` stage points the project's fp-lib-table there for any library of that name. Currently `pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3` (D-015).

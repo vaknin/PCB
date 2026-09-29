@@ -41,7 +41,8 @@ fn s(v: &Value) -> &str {
     v.as_str().unwrap_or("")
 }
 
-fn judge(name: &str, violations: &[Value], waivers: &[Waiver]) -> bool {
+/// (open, waived with its reason): errors are never waived.
+fn classify<'w>(violations: &[Value], waivers: &'w [Waiver]) -> (Vec<String>, Vec<(String, &'w str)>) {
     let (mut open, mut waived) = (vec![], vec![]);
     for v in violations {
         if s(&v["severity"]) == "ignore" {
@@ -54,6 +55,11 @@ fn judge(name: &str, violations: &[Value], waivers: &[Waiver]) -> bool {
             _ => open.push(text),
         }
     }
+    (open, waived)
+}
+
+fn judge(name: &str, violations: &[Value], waivers: &[Waiver]) -> bool {
+    let (open, waived) = classify(violations, waivers);
     let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
     for v in violations {
         *counts.entry((s(&v["severity"]).into(), s(&v["type"]).into())).or_default() += 1;
@@ -98,6 +104,22 @@ pub fn drc(project_dir: &Path, name: &str, waivers: &[Waiver]) -> Result<bool> {
         bail!("DRC did not produce a report:\n{log}");
     }
     Ok(judge("DRC", &violations(&serde_json::from_str(&std::fs::read_to_string(&out)?)?), waivers))
+}
+
+/// The DRC gate without its printout: the open items (errors, unwaived warnings,
+/// unconnected items, parity), for comparing candidate routes. Same run as `drc`.
+pub fn drc_open(project_dir: &Path, name: &str, waivers: &[Waiver]) -> Result<Vec<String>> {
+    let out = project_dir.join("drc.json");
+    let _ = std::fs::remove_file(&out);
+    let pcb = project_dir.join(format!("{name}.kicad_pcb"));
+    let log = cli(&[
+        "pcb", "drc", "--format", "json", "--severity-all", "--units", "mm", "--schematic-parity", "--refill-zones",
+        "--save-board", "-o", &out.to_string_lossy(), &pcb.to_string_lossy(),
+    ])?;
+    if !out.exists() {
+        bail!("DRC did not produce a report:\n{log}");
+    }
+    Ok(classify(&violations(&serde_json::from_str(&std::fs::read_to_string(&out)?)?), waivers).0)
 }
 
 /// Refill every zone with kicad-cli (its DRC refills and saves the board).

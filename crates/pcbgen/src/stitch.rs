@@ -27,8 +27,9 @@ fn grid(lo: Pt, hi: Pt, step: f64) -> Vec<Pt> {
     out
 }
 
-/// Via positions for `net` (not yet added to the board).
-pub fn stitch(board: &Board, opts: &RouteOptions, net: &str, pitch: f64) -> Vec<Pt> {
+/// Via positions for `net` (not yet added to the board), and notes on pour pieces that
+/// got none.
+pub fn stitch(board: &Board, opts: &RouteOptions, net: &str, pitch: f64) -> (Vec<Pt>, Vec<String>) {
     let (dia, drill) = opts.stitch_via;
     let zones: Vec<_> = board.zones.iter().filter(|z| z.net == net).collect();
     // filled pieces per layer; a via must sit inside one on every layer the net pours on
@@ -43,7 +44,7 @@ pub fn stitch(board: &Board, opts: &RouteOptions, net: &str, pitch: f64) -> Vec<
     }
     let has = |l: &str| per_layer.iter().any(|(x, _)| x == l);
     if !(has("F.Cu") && has("B.Cu")) {
-        return vec![];
+        return (vec![], vec![]);
     }
     let inset = dia / 2.0 + 0.05;
     let courtyards: Vec<&[Pt]> = board.footprints.iter().flat_map(|f| f.courtyards.iter().map(Vec::as_slice)).collect();
@@ -71,7 +72,7 @@ pub fn stitch(board: &Board, opts: &RouteOptions, net: &str, pitch: f64) -> Vec<
             && !other_vias.iter().any(|v| (p - v.at).norm() <= v.size / 2.0 + track_gap)
     };
 
-    let mut added = vec![];
+    let (mut added, mut notes) = (vec![], vec![]);
     let (lo, hi) = board.edge_bbox();
     for p in grid(lo, hi, pitch) {
         if fits(p, &holes, false) {
@@ -98,16 +99,16 @@ pub fn stitch(board: &Board, opts: &RouteOptions, net: &str, pitch: f64) -> Vec<
                     holes.push((p, drill / 2.0));
                     added.push(p);
                 }
-                None => println!(
+                None => notes.push(format!(
                     "stitching: no room for a via in a {} piece near ({:.1}, {:.1}) mm",
                     z.name,
                     centre.x - crate::board::ORIGIN.x,
                     centre.y - crate::board::ORIGIN.y
-                ),
+                )),
             }
         }
     }
-    added
+    (added, notes)
 }
 
 #[cfg(test)]

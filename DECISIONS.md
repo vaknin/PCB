@@ -3,6 +3,17 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-019 pcbgen: the route stage checks its best candidates with KiCad's DRC (DECIDED, technical, 2026-09-29)
+- **Why:** the router's own numbers (unrouted, thin track, vias, length) can't see some faults. On D-018's scratch board, the order ranked best ran a track through the ground pour's spokes to the USB-C shell pads, and the full check failed with 2 `starved_thermal` errors. A different order would have passed.
+- **What:** after Freerouting has routed every order, the best `RouteOptions::drc_checks` of them (default 3) are each finished the way the kept one always was: tracks and vias, zone fill, stitching, fill. Each runs in its own copy of the project (`route/try-<n>/check/`) and gets the same DRC gate as the check stage: fab rules, schematic parity, the board's waivers.
+  - The kept order is the best-ranked one with no open DRC item. If none is clean, it is the one with the fewest open items, and the stage says the check will fail.
+  - Every checked order's open count goes into `route/tries.json` (`drc_open`). `drc_checks: 0` keeps the old behaviour.
+- **Cost:** about 10 s per run (the three checks run at once), on a ~2.5 min run.
+- **Result:** on D-018's scratch board (R5 and the SHT40 on the back), order 5 was dropped (2 open), order 6 kept (0 open), and every gate passed.
+  - On the unchanged starter, the kept order is the same as before (order 2), so the committed board stays as it is.
+- The check stage still runs its own DRC; this only chooses better among routes that already exist. It adds no new rule.
+- Stitching now returns its "no room for a via" notes instead of printing them, so only the kept board's notes are shown.
+
 ## D-018 pcbgen: bottom-side parts; Freerouting's "violations" explained (DECIDED, technical, 2026-09-29)
 - **Bottom-side parts work end to end.** In a layout, `at_bottom(x, y, rot)` places a part on the back. `rot` is the angle KiCad shows for the flipped part, still CCW as seen from the top. It means: flip the footprint left-right at angle 0 (pcbnew's flip), then turn it to `rot`.
 - **Board file:** `footprint::flip` rewrites the library footprint the way pcbnew saves a flipped one:
@@ -27,7 +38,7 @@ Research behind these: `research/2026-09-29-landscape.md`.
 - **Scratch test:** a copy of the starter board with R5 and the SHT40 (U4) moved to the back, full pipeline into a scratch directory.
   - Passed: ERC 0, schematic parity 0, 0 unrouted, no copper in keep-outs, 11 waived silk warnings as on the starter, CPL as expected. The render shows both parts on the back with mirrored fab text, the keep-out and escape stubs in place.
   - DRC failed on one item: 2 `starved_thermal` errors on the USB-C shield pads. The kept route ran a track through their ground-pour spokes. That is a routing outcome near J1, not a bottom-side placement fault, and the gate caught it.
-  - The route stage's score doesn't look at DRC; a board that hits this would need a placement tweak or a DRC-aware pick of the order (not done).
+  - The route stage's score didn't look at DRC; D-019 fixes that, and the same board then passes every gate.
 - **Unchanged starter:** a full scratch run gave a byte-identical schematic, BOM, CPL, positions, every DSN body and the session file, and an identical routing report. The committed board is not re-routed. `fab/README.md` changes only in a heading ("…, or bottom side").
 - **Freerouting's ~20 "clearance violations" (open since D-017): explained, harmless.** `scripts/fr-violations/run.sh <dsn>` loads the DSN with Freerouting's own reader (`DsnReader.readBoard`) and prints `Item.clearanceViolations()` with both items and their places. On the starter's DSN they are:
   - 12: the ESP32 EPAD's thermal holes overlapping the pad, same net

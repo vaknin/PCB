@@ -91,7 +91,7 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
         println!("pcb: {}", pcb::build(&out, &name, &layout.spec, tree)?.display());
     }
     if want("route") {
-        route::route(&pcb_path, &layout.route)?;
+        route::route(&pcb_path, &layout.route, &layout.waivers)?;
     }
     if want("check") {
         let tree = cached(&mut net_tree, &sch_path)?;
