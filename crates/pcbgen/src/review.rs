@@ -218,12 +218,22 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
                 let all = violations(&rep);
                 let (open, waived) = classify(&all, i.waivers);
                 detail = format!("{} open, {} waived", open.len(), waived.len());
+                // one line per (type, reason), with a count: the same waiver often hits many items
+                let mut groups: Vec<(&str, &str, &str, usize)> = vec![];
                 for (v, why) in &waived {
+                    let (kind, desc) = (v["type"].as_str().unwrap_or(""), v["description"].as_str().unwrap_or(""));
+                    match groups.iter_mut().find(|x| x.0 == kind && x.2 == *why) {
+                        Some(x) => x.3 += 1,
+                        None => groups.push((kind, desc, why, 1)),
+                    }
+                }
+                for (kind, desc, why, n) in groups {
+                    let what = if n == 1 { "warning" } else { "warnings" };
                     risks.push(format!(
-                        "Accepted {} warning <code>{}</code> ({}): {}",
+                        "{n} accepted {} {what}, <code>{}</code> ({}): {}",
                         g.to_uppercase(),
-                        esc(v["type"].as_str().unwrap_or("")),
-                        esc(v["description"].as_str().unwrap_or("")),
+                        esc(kind),
+                        esc(desc),
                         esc(why)
                     ));
                 }
