@@ -7,6 +7,7 @@ pub mod circuit;
 pub mod cli;
 pub mod dsn;
 pub mod fab;
+pub mod failure;
 pub mod footprint;
 pub mod gates;
 pub mod geom;

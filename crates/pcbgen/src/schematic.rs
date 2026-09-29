@@ -234,7 +234,7 @@ fn power_instance(c: &Circuit, sym: &Symbol, reference: &str, x: f64, y: f64, ro
     n
 }
 
-fn today() -> String {
+pub fn today() -> String {
     let out = std::process::Command::new("date").arg("+%F").output().expect("date");
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }

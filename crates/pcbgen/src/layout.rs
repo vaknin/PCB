@@ -150,9 +150,22 @@ pub struct RouteOptions {
     pub fanout: bool,
     /// The best this many orders (by the router's numbers) are finished (pours, stitching)
     /// and DRC-checked; the best-ranked one with no open DRC item is kept, else the one
-    /// with the fewest. 0 keeps the router's best unchecked. Each check takes ~15 s
-    /// (they run at once).
+    /// with the fewest. 0 keeps the router's best unchecked (and turns the escalation
+    /// below off). Each check takes ~15 s (they run at once).
     pub drc_checks: usize,
+    /// When none of the checked orders is clean, the route stage escalates, cheapest
+    /// first (D-020): it checks every other order already routed, then routes up to this
+    /// many further rounds of `extra_tries` new orders (seeds after the last) and checks
+    /// those, stopping at the first round with a clean order. 0 stops after the
+    /// already-routed ones.
+    pub extra_rounds: u32,
+    /// New footprint orders per extra round (~55 s each, `parallel` at a time).
+    pub extra_tries: u32,
+    /// Prevention rules (D-020): keep the router's tracks and vias away from these pads, so
+    /// a pour's thermal spokes to them stay free. Only for pads on a poured net (the
+    /// pour, not a track, connects them). Written into the router's DSN only; the board
+    /// and its DRC don't see them.
+    pub pad_rings: Vec<PadRing>,
     /// Add vias tying this net's pours together after routing.
     pub stitch_net: Option<String>,
     /// mm grid for stitching vias.
@@ -177,12 +190,33 @@ impl Default for RouteOptions {
             parallel: 4,
             fanout: false,
             drc_checks: 3,
+            extra_rounds: 1,
+            extra_tries: 8,
+            pad_rings: vec![],
             stitch_net: Some("GND".into()),
             stitch_pitch: 3.0,
             stitch_via: (0.6, 0.3),
             stitch_clearance: 0.25,
             stitch_local: vec![],
         }
+    }
+}
+
+/// A keep-out for the router around every pad `pad` of part `reference`: the pad's
+/// rectangle grown by `margin` mm on each side, no tracks or vias, on the pad's copper
+/// layers.
+#[derive(Clone, Debug)]
+pub struct PadRing {
+    pub reference: String,
+    pub pad: String,
+    pub margin: f64,
+}
+
+impl PadRing {
+    /// A 1.0 mm ring: the GND pour's thermal gap (0.3) plus its clearance to other copper
+    /// (0.3) plus room for the spoke to reach solid pour.
+    pub fn new(reference: &str, pad: &str) -> Self {
+        PadRing { reference: reference.into(), pad: pad.into(), margin: 1.0 }
     }
 }
 

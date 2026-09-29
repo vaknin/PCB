@@ -31,7 +31,8 @@ fn violations(report: &Value) -> Vec<Value> {
         .collect()
 }
 
-fn describe(v: &Value) -> String {
+/// One line for a DRC/ERC item: `[severity] type: description -- item; item`.
+pub fn describe(v: &Value) -> String {
     let items: Vec<&str> =
         v["items"].as_array().into_iter().flatten().map(|i| i["description"].as_str().unwrap_or("")).collect();
     format!("[{}] {}: {} -- {}", s(&v["severity"]), s(&v["type"]), s(&v["description"]), items.join("; "))
@@ -42,7 +43,7 @@ fn s(v: &Value) -> &str {
 }
 
 /// (open, waived with its reason): errors are never waived.
-fn classify<'w>(violations: &[Value], waivers: &'w [Waiver]) -> (Vec<String>, Vec<(String, &'w str)>) {
+fn classify<'v, 'w>(violations: &'v [Value], waivers: &'w [Waiver]) -> (Vec<&'v Value>, Vec<(&'v Value, &'w str)>) {
     let (mut open, mut waived) = (vec![], vec![]);
     for v in violations {
         if s(&v["severity"]) == "ignore" {
@@ -51,8 +52,8 @@ fn classify<'w>(violations: &[Value], waivers: &'w [Waiver]) -> (Vec<String>, Ve
         let text = describe(v);
         let w = waivers.iter().find(|w| w.kind == s(&v["type"]) && text.contains(w.substring));
         match w {
-            Some(w) if s(&v["severity"]) != "error" => waived.push((text, w.reason)),
-            _ => open.push(text),
+            Some(w) if s(&v["severity"]) != "error" => waived.push((v, w.reason)),
+            _ => open.push(v),
         }
     }
     (open, waived)
@@ -60,6 +61,8 @@ fn classify<'w>(violations: &[Value], waivers: &'w [Waiver]) -> (Vec<String>, Ve
 
 fn judge(name: &str, violations: &[Value], waivers: &[Waiver]) -> bool {
     let (open, waived) = classify(violations, waivers);
+    let open: Vec<String> = open.into_iter().map(describe).collect();
+    let waived: Vec<(String, &str)> = waived.into_iter().map(|(v, why)| (describe(v), why)).collect();
     let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
     for v in violations {
         *counts.entry((s(&v["severity"]).into(), s(&v["type"]).into())).or_default() += 1;
@@ -107,8 +110,9 @@ pub fn drc(project_dir: &Path, name: &str, waivers: &[Waiver]) -> Result<bool> {
 }
 
 /// The DRC gate without its printout: the open items (errors, unwaived warnings,
-/// unconnected items, parity), for comparing candidate routes. Same run as `drc`.
-pub fn drc_open(project_dir: &Path, name: &str, waivers: &[Waiver]) -> Result<Vec<String>> {
+/// unconnected items, parity) as KiCad reports them, for comparing candidate routes.
+/// Same run as `drc`.
+pub fn drc_open(project_dir: &Path, name: &str, waivers: &[Waiver]) -> Result<Vec<Value>> {
     let out = project_dir.join("drc.json");
     let _ = std::fs::remove_file(&out);
     let pcb = project_dir.join(format!("{name}.kicad_pcb"));
@@ -119,7 +123,8 @@ pub fn drc_open(project_dir: &Path, name: &str, waivers: &[Waiver]) -> Result<Ve
     if !out.exists() {
         bail!("DRC did not produce a report:\n{log}");
     }
-    Ok(classify(&violations(&serde_json::from_str(&std::fs::read_to_string(&out)?)?), waivers).0)
+    let all = violations(&serde_json::from_str(&std::fs::read_to_string(&out)?)?);
+    Ok(classify(&all, waivers).0.into_iter().cloned().collect())
 }
 
 /// Refill every zone with kicad-cli (its DRC refills and saves the board).

@@ -171,7 +171,7 @@ fn shift(body: &str, o: Pt) -> String {
 }
 
 /// Short stable hash of a padstack's shape text, to name padstacks that differ only in it.
-fn fnv(s: &str) -> String {
+pub(crate) fn fnv(s: &str) -> String {
     let h = s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
     format!("{:08X}", h >> 32)
 }

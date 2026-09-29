@@ -15,7 +15,7 @@ use crate::board::Board;
 use crate::gates::fill_zones;
 use crate::layout::{RouteOptions, Waiver};
 use crate::sexpr::{Sexp, dumps, parse};
-use crate::{dsn, node, project, ses, stitch, uid};
+use crate::{dsn, failure, node, project, ses, stitch, uid};
 
 pub fn freerouting() -> PathBuf {
     crate::repo_root().join("tools/freerouting-2.4.1-linux-x64/bin/freerouting")
@@ -43,8 +43,137 @@ fn hole_clearance(pro: &Path) -> f64 {
         .unwrap_or(0.25)
 }
 
+/// What every Freerouting run of one board shares.
+struct Router<'a> {
+    fr: PathBuf,
+    board: Board,
+    rules: project::BoardRules,
+    hole_clearance: f64,
+    opts: &'a RouteOptions,
+    work: PathBuf,
+}
+
+impl Router<'_> {
+    /// Route these footprint orders, `parallel` at a time; the ones that finished, by order.
+    fn run(&self, seeds: &[u64]) -> Vec<Try> {
+        let parallel = self.opts.parallel.clamp(1, seeds.len().max(1));
+        println!("freerouting: {} footprint orders, {parallel} at a time", seeds.len());
+        pool(seeds, parallel, |&seed| {
+            let r = run_try(&self.fr, &self.board, &self.rules, self.hole_clearance, self.opts, seed, &self.work.join(format!("try-{seed}")));
+            match &r {
+                Ok(t) => println!("freerouting: {}", t.summary()),
+                Err(e) => println!("freerouting: order {seed} failed: {e:#}"),
+            }
+            r
+        })
+        .into_iter()
+        .filter_map(Result::ok) // failed orders were reported as they finished
+        .collect()
+    }
+}
+
+/// Run `f` on every job, `n` at a time; the results in job order.
+fn pool<J: Sync, R: Send>(jobs: &[J], n: usize, f: impl Fn(&J) -> R + Sync) -> Vec<R> {
+    let next = AtomicUsize::new(0);
+    let (f, next) = (&f, &next);
+    let mut done: Vec<(usize, R)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..n.clamp(1, jobs.len().max(1)))
+            .map(|_| {
+                s.spawn(move || {
+                    let mut done = vec![];
+                    loop {
+                        let k = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(j) = jobs.get(k) else { break };
+                        done.push((k, f(j)));
+                    }
+                    done
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().expect("worker thread panicked")).collect()
+    });
+    done.sort_by_key(|d| d.0);
+    done.into_iter().map(|d| d.1).collect()
+}
+
+/// The next step of the route stage when checking has started (D-020), cheapest first.
+#[derive(Debug, PartialEq)]
+enum Step {
+    /// A checked order is clean, or there is nothing left to try.
+    Stop,
+    /// DRC-check every order already routed but not yet checked (~15 s each).
+    CheckRest,
+    /// Route `extra_tries` new orders (~55 s each) and check them.
+    RouteMore,
+}
+
+/// `best_open`: the open DRC items of the best checked order (None if no check finished);
+/// `unchecked`: routed orders not checked yet; `rounds`: extra rounds routed so far.
+fn next_step(best_open: Option<usize>, unchecked: usize, rounds: u32, opts: &RouteOptions) -> Step {
+    if best_open == Some(0) || opts.drc_checks == 0 {
+        Step::Stop
+    } else if unchecked > 0 {
+        Step::CheckRest
+    } else if rounds < opts.extra_rounds && opts.extra_tries > 0 {
+        Step::RouteMore
+    } else {
+        Step::Stop
+    }
+}
+
+/// Orders best first by the router's own numbers; ties go to the lower order.
+fn rank(tries: &[Try]) -> Vec<usize> {
+    let mut ranked: Vec<usize> = (0..tries.len()).collect();
+    ranked.sort_by_key(|&i| (tries[i].key(), tries[i].seed));
+    ranked
+}
+
+/// Of the checked orders, the one to keep (see `pick`).
+fn best(tries: &[Try]) -> Option<usize> {
+    let checked: Vec<usize> = rank(tries).into_iter().filter(|&i| tries[i].drc.is_some()).collect();
+    pick(&checked.iter().map(|&i| tries[i].drc.as_ref().map_or(0, Vec::len)).collect::<Vec<_>>()).map(|k| checked[k])
+}
+
+/// The router's keep-outs for `RouteOptions::pad_rings`: each pad's rectangle grown by the
+/// margin, on its copper layers, no tracks or vias. Only pads on a poured net, which the
+/// pour connects without a track.
+fn pad_rings(board: &Board, opts: &RouteOptions) -> Result<Vec<crate::board::RuleArea>> {
+    let poured: Vec<&str> = opts.stitch_net.iter().map(String::as_str).chain(opts.stitch_local.iter().map(|l| l.0.as_str())).collect();
+    let mut out = vec![];
+    for ring in &opts.pad_rings {
+        let Some(fp) = board.footprints.iter().find(|f| f.reference == ring.reference) else {
+            bail!("pad ring: no part {}", ring.reference);
+        };
+        let pads: Vec<_> = fp.pads.iter().filter(|p| p.number == ring.pad).collect();
+        if pads.is_empty() {
+            bail!("pad ring: {} has no pad {}", ring.reference, ring.pad);
+        }
+        for (k, pad) in pads.into_iter().enumerate() {
+            let net = pad.net.as_deref().unwrap_or("");
+            if !poured.contains(&net) {
+                bail!("pad ring: {} pad {} is on {net:?}, not a poured net ({poured:?}); a ring would leave it unroutable", ring.reference, ring.pad);
+            }
+            let (w, h) = (pad.size.0 / 2.0 + ring.margin, pad.size.1 / 2.0 + ring.margin);
+            let poly = [(-w, -h), (w, -h), (w, h), (-w, h)]
+                .iter()
+                .map(|&(x, y)| pad.pos + crate::geom::rotate(pad.offset + crate::geom::pt(x, y), pad.angle))
+                .collect();
+            let layers = pad.layers.iter().filter(|l| l.ends_with(".Cu")).cloned().collect();
+            out.push(crate::board::RuleArea {
+                name: format!("pad ring {} {}{}", ring.reference, ring.pad, if k == 0 { String::new() } else { format!(" {k}") }),
+                layers,
+                poly,
+                no_tracks: true,
+                no_vias: true,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Export DSN, run Freerouting on several footprint orders, then finish (SES tracks,
-/// fill, stitch, fill) and DRC-check the best few and keep the best that passes.
+/// fill, stitch, fill) and DRC-check the best few and keep the best that passes. If none
+/// passes, escalate (`next_step`); if still none, write the failure report (D-020).
 pub fn route(pcb: &Path, opts: &RouteOptions, waivers: &[Waiver]) -> Result<()> {
     let fr = freerouting();
     if !fr.exists() {
@@ -52,10 +181,13 @@ pub fn route(pcb: &Path, opts: &RouteOptions, waivers: &[Waiver]) -> Result<()> 
     }
     let work = pcb.parent().unwrap().join("route");
     std::fs::create_dir_all(&work)?;
-    // earlier runs' orders, so route/ only holds this run's
+    // earlier runs' orders and report, so route/ only holds this run's
     for e in std::fs::read_dir(&work)?.flatten() {
-        if e.file_name().to_string_lossy().starts_with("try-") {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n.starts_with("try-") {
             std::fs::remove_dir_all(e.path())?;
+        } else if n == "failure.json" {
+            std::fs::remove_file(e.path())?;
         }
     }
 
@@ -64,84 +196,82 @@ pub fn route(pcb: &Path, opts: &RouteOptions, waivers: &[Waiver]) -> Result<()> 
     root.items_mut().retain(|c| !((c.is("segment") || c.is("arc") || c.is("via")) && !c.flag("locked")));
     save(pcb, &root)?;
 
-    let rules = project::read_classes(&pcb.with_extension("kicad_pro"))?;
-    let board = Board::from_sexp(&root)?;
-    let hole_clearance = hole_clearance(&pcb.with_extension("kicad_pro"));
+    let mut board = Board::from_sexp(&root)?;
+    let origin = board.edge_bbox().0;
+    let rings = pad_rings(&board, opts)?;
+    if !rings.is_empty() {
+        println!("freerouting: {} pad ring(s) keep tracks and vias off: {}", rings.len(), rings.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "));
+    }
+    board.keepouts.extend(rings);
+    let router = Router {
+        fr,
+        board,
+        rules: project::read_classes(&pcb.with_extension("kicad_pro"))?,
+        hole_clearance: hole_clearance(&pcb.with_extension("kicad_pro")),
+        opts,
+        work: work.clone(),
+    };
 
-    let jobs: Vec<u64> = (0..opts.tries.max(1) as u64).collect();
-    let parallel = opts.parallel.clamp(1, jobs.len());
-    println!("freerouting: {} footprint orders, {parallel} at a time", jobs.len());
     let t0 = Instant::now();
-    let next = AtomicUsize::new(0);
-    let results: Vec<(u64, Result<Try>)> = std::thread::scope(|s| {
-        let workers: Vec<_> = (0..parallel)
-            .map(|_| {
-                s.spawn(|| {
-                    let mut done = vec![];
-                    while let Some(&seed) = jobs.get(next.fetch_add(1, Ordering::Relaxed)) {
-                        let r = run_try(&fr, &board, &rules, hole_clearance, opts, seed, &work.join(format!("try-{seed}")));
-                        match &r {
-                            Ok(t) => println!("freerouting: {}", t.summary()),
-                            Err(e) => println!("freerouting: order {seed} failed: {e:#}"),
-                        }
-                        done.push((seed, r));
-                    }
-                    done
-                })
-            })
-            .collect();
-        workers.into_iter().flat_map(|w| w.join().expect("routing thread panicked")).collect()
-    });
-    // failed orders were reported as they finished
-    let mut tries: Vec<Try> = results.into_iter().filter_map(|(_, r)| r.ok()).collect();
-    tries.sort_by_key(|t| t.seed);
+    let first: Vec<u64> = (0..opts.tries.max(1) as u64).collect();
+    let mut next_seed = first.len() as u64;
+    let mut tries = router.run(&first);
     if tries.is_empty() {
         bail!("every Freerouting run failed; see {}/try-*/freerouting.log", work.display());
     }
-    // best first by the router's own numbers; ties go to the lower order
-    let mut ranked: Vec<usize> = (0..tries.len()).collect();
-    ranked.sort_by_key(|&i| (tries[i].key(), tries[i].seed));
 
     // Finish the best few (tracks, pours, stitching) each in its own folder and run KiCad's
     // DRC on them: the router's numbers can't see e.g. a track starving a pour's thermal
     // spokes. Keep the best-ranked one DRC passes, else the one with the fewest open items.
-    let n = opts.drc_checks.min(ranked.len());
+    let mut steps: Vec<String> = vec![];
+    let mut logs: Vec<(u64, Vec<String>)> = vec![];
+    let n = opts.drc_checks.min(tries.len());
     let kept = if n == 0 {
-        finish(pcb, &root, &tries[ranked[0]], opts)?.iter().for_each(|l| println!("{l}"));
-        ranked[0]
+        let k = rank(&tries)[0];
+        finish(pcb, &root, &tries[k], opts)?.iter().for_each(|l| println!("{l}"));
+        k
     } else {
         println!("drc: finishing the best {n} orders and checking each");
-        let checked: Vec<(usize, Result<Checked>)> = std::thread::scope(|s| {
-            let handles: Vec<_> = ranked[..n]
-                .iter()
-                .map(|&i| {
-                    let (t, root) = (&tries[i], &root);
-                    s.spawn(move || (i, check_try(pcb, root, t, opts, waivers)))
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().expect("check thread panicked")).collect()
-        });
-        let mut logs = vec![];
-        for (i, r) in checked {
-            match r {
-                Ok((open, log)) => {
-                    println!("drc: order {}: {} open item(s){}", tries[i].seed, open.len(), open.first().map_or(String::new(), |o| format!(", e.g. {o}")));
-                    tries[i].drc_open = Some(open.len());
-                    logs.push((i, open.len(), log));
+        let ranked = rank(&tries);
+        check(pcb, &root, &mut tries, &ranked[..n], opts, waivers, &mut logs);
+        steps.push(format!("checked the best {n} of {} routed orders", tries.len()));
+        let mut rounds = 0;
+        loop {
+            let unchecked: Vec<usize> = rank(&tries).into_iter().filter(|&i| !tries[i].checked).collect();
+            let best_open = best(&tries).and_then(|i| tries[i].drc.as_ref().map(Vec::len));
+            match next_step(best_open, unchecked.len(), rounds, opts) {
+                Step::Stop => break,
+                Step::CheckRest => {
+                    println!("drc: no checked order is clean; checking the other {} routed orders", unchecked.len());
+                    check(pcb, &root, &mut tries, &unchecked, opts, waivers, &mut logs);
+                    steps.push(format!("checked the other {} routed orders", unchecked.len()));
                 }
-                Err(e) => println!("drc: order {}: check failed: {e:#}", tries[i].seed),
+                Step::RouteMore => {
+                    rounds += 1;
+                    let seeds: Vec<u64> = (next_seed..next_seed + opts.extra_tries as u64).collect();
+                    next_seed += seeds.len() as u64;
+                    println!("freerouting: still no clean order; extra round {rounds} of {}: orders {}-{}", opts.extra_rounds, seeds[0], seeds[seeds.len() - 1]);
+                    let before = tries.len();
+                    tries.extend(router.run(&seeds));
+                    steps.push(format!("routed {} more orders ({}-{}), {} finished", seeds.len(), seeds[0], seeds[seeds.len() - 1], tries.len() - before));
+                }
             }
         }
-        let Some(k) = pick(&logs.iter().map(|l| l.1).collect::<Vec<_>>()) else { bail!("no checked order could be finished") };
-        let (i, open, log) = logs.swap_remove(k);
+        let Some(k) = best(&tries) else { bail!("no checked order could be finished") };
+        let log = logs.iter().position(|l| l.0 == tries[k].seed).map(|p| logs.swap_remove(p).1).unwrap_or_default();
         for l in log {
             println!("{l}");
         }
+        let open = tries[k].drc.as_ref().map_or(0, Vec::len);
         if open > 0 {
-            println!("drc: WARNING: every checked order has open DRC items; the check stage will fail. Check more orders (--tries, RouteOptions::drc_checks) or change the placement");
+            report_failure(pcb, origin, &tries, k, &steps)?;
+            println!(
+                "drc: WARNING: every checked order has open DRC items; the check stage will fail. See {} and the fixes above",
+                work.join("failure.json").display()
+            );
         }
-        std::fs::copy(tries[i].dir.join("check").join(pcb.file_name().unwrap()), pcb)?;
-        i
+        std::fs::copy(tries[k].dir.join("check").join(pcb.file_name().unwrap()), pcb)?;
+        k
     };
     let best = &tries[kept];
     println!("freerouting: kept order {} of {} ({:.0} s in all): {}", best.seed, tries.len(), t0.elapsed().as_secs_f64(), best.summary());
@@ -157,10 +287,57 @@ pub fn route(pcb: &Path, opts: &RouteOptions, waivers: &[Waiver]) -> Result<()> 
     }
     let summary = serde_json::json!({
         "kept_order": best.seed,
-        "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest; of the best `drc_checks` orders, finished and checked, the first with no open DRC item, else the fewest",
+        "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest; of the best `drc_checks` orders, finished and checked, the first with no open DRC item, else the fewest; if none is clean, the other routed orders are checked, then `extra_rounds` of `extra_tries` new orders (D-020)",
+        "steps": steps,
         "orders": tries.iter().map(Try::json).collect::<Vec<_>>(),
     });
     std::fs::write(work.join("tries.json"), serde_json::to_string_pretty(&summary)? + "\n")?;
+    Ok(())
+}
+
+/// Finish and DRC-check these orders (all at once, up to `max(parallel, drc_checks)`),
+/// recording their open items; the finishing logs go to `logs`.
+fn check(pcb: &Path, root: &Sexp, tries: &mut [Try], which: &[usize], opts: &RouteOptions, waivers: &[Waiver], logs: &mut Vec<(u64, Vec<String>)>) {
+    let results = {
+        let tries = &*tries;
+        pool(which, opts.parallel.max(opts.drc_checks), |&i| check_try(pcb, root, &tries[i], opts, waivers))
+    };
+    for (&i, r) in which.iter().zip(results) {
+        let t = &mut tries[i];
+        t.checked = true;
+        match r {
+            Ok((open, log)) => {
+                println!("drc: order {}: {} open item(s){}", t.seed, open.len(), open.first().map_or(String::new(), |o| format!(", e.g. {}", crate::gates::describe(o))));
+                t.drc = Some(open);
+                logs.push((t.seed, log));
+            }
+            Err(e) => println!("drc: order {}: check failed: {e:#}", t.seed),
+        }
+    }
+}
+
+/// No checked order is clean: write `route/failure.json`, print it, and log the failed
+/// orders in `<board dir>/route-failures.jsonl`.
+fn report_failure(pcb: &Path, origin: crate::geom::Pt, tries: &[Try], kept: usize, steps: &[String]) -> Result<()> {
+    let name = board_name(pcb);
+    let date = crate::schematic::today();
+    let checked: Vec<(u64, Vec<serde_json::Value>)> =
+        rank(tries).into_iter().filter_map(|i| tries[i].drc.clone().map(|d| (tries[i].seed, d))).collect();
+    let report = failure::report(&name, &date, origin, &checked, tries[kept].seed, steps);
+    let work = pcb.parent().unwrap().join("route");
+    std::fs::write(work.join("failure.json"), serde_json::to_string_pretty(&report)? + "\n")?;
+    for l in failure::summary(&report) {
+        println!("{l}");
+    }
+    // the placement and rules, as the router saw them (the DSN of order 0, without its path)
+    let dsn = std::fs::read_to_string(work.join("try-0/board.dsn")).unwrap_or_default();
+    let layout = crate::dsn::fnv(dsn.split_once('\n').map_or("", |d| d.1));
+    let log = pcb.parent().unwrap().parent().unwrap().join("route-failures.jsonl");
+    let added = failure::append_log(&log, &failure::log_lines(&name, &date, &layout, &checked))?;
+    println!("route failure: {added} failed order(s) added to {}", log.display());
+    for l in failure::log_summary(&log) {
+        println!("{l}");
+    }
     Ok(())
 }
 
@@ -171,7 +348,7 @@ fn pick(open: &[usize]) -> Option<usize> {
 }
 
 /// A checked order: (open DRC items, the finishing log).
-type Checked = (Vec<String>, Vec<String>);
+type Checked = (Vec<serde_json::Value>, Vec<String>);
 
 /// Finish one order's routing in `<try>/check/` (a copy of the project) and run the DRC
 /// gate there: (open items, the finishing log).
@@ -265,8 +442,10 @@ pub struct Try {
     /// Freerouting's own clearance-violation count (KiCad's DRC is the gate).
     pub fr_violations: Option<usize>,
     pub secs: f64,
-    /// Open DRC items once finished, for the orders that were checked.
-    pub drc_open: Option<usize>,
+    /// Whether the route stage tried to finish and DRC-check this order.
+    pub checked: bool,
+    /// Its open DRC items once finished, if its check ran.
+    pub drc: Option<Vec<serde_json::Value>>,
 }
 
 impl Try {
@@ -304,7 +483,7 @@ impl Try {
             "vias": self.vias.len(),
             "track_length_mm": r1(self.length_mm),
             "freerouting_clearance_violations": self.fr_violations,
-            "drc_open": self.drc_open,
+            "drc_open": self.drc.as_ref().map(Vec::len),
         })
     }
 }
@@ -371,7 +550,8 @@ fn run_try(fr: &Path, board: &Board, rules: &project::BoardRules, hole_clearance
         pour_unrouted: pour.iter().map(|p| p.1).sum(),
         fr_violations,
         secs: t0.elapsed().as_secs_f64(),
-        drc_open: None,
+        checked: false,
+        drc: None,
     })
 }
 
@@ -446,7 +626,8 @@ The following connections could not be routed -- please review your design:
             length_mm: len,
             fr_violations: None,
             secs: 0.0,
-            drc_open: None,
+            checked: false,
+            drc: None,
         }
     }
 
@@ -456,6 +637,38 @@ The following connections could not be routed -- please review your design:
         assert_eq!(pick(&[0, 0]), Some(0));
         assert_eq!(pick(&[3, 1, 1]), Some(1));
         assert_eq!(pick(&[]), None);
+    }
+
+    /// The escalation ladder (D-020): stop on a clean order; else check what's routed,
+    /// then route extra rounds, then stop.
+    #[test]
+    fn ladder_cheapest_first() {
+        let o = RouteOptions::default(); // 1 extra round of 8
+        assert_eq!(next_step(Some(0), 5, 0, &o), Step::Stop);
+        assert_eq!(next_step(Some(2), 5, 0, &o), Step::CheckRest);
+        assert_eq!(next_step(None, 5, 0, &o), Step::CheckRest); // no check finished yet
+        assert_eq!(next_step(Some(2), 0, 0, &o), Step::RouteMore);
+        assert_eq!(next_step(Some(2), 8, 1, &o), Step::CheckRest); // the new round's orders
+        assert_eq!(next_step(Some(2), 0, 1, &o), Step::Stop);
+        let none = RouteOptions { extra_rounds: 0, ..RouteOptions::default() };
+        assert_eq!(next_step(Some(2), 0, 0, &none), Step::Stop);
+        let off = RouteOptions { drc_checks: 0, ..RouteOptions::default() };
+        assert_eq!(next_step(Some(2), 5, 0, &off), Step::Stop);
+    }
+
+    /// The kept order among checked ones follows the global rank, not the check order.
+    #[test]
+    fn best_checked_order() {
+        let open = |n: usize| Some(vec![serde_json::json!({}); n]);
+        let mut v = vec![t(0, 0, 0, 0.0, 20, 100.0), t(1, 0, 0, 0.0, 10, 100.0), t(2, 0, 0, 0.0, 30, 100.0), t(3, 0, 0, 0.0, 5, 100.0)];
+        assert_eq!(best(&v), None);
+        (v[1].drc, v[0].drc) = (open(2), open(2));
+        assert_eq!(best(&v), Some(1)); // ranked above order 0 (fewer vias)
+        v[2].drc = open(0);
+        assert_eq!(best(&v), Some(2));
+        v[3].drc = open(0); // order 3 ranks first of all
+        assert_eq!(best(&v), Some(3));
+        assert_eq!(pool(&[3, 1, 2], 2, |x| x * 10), [30, 10, 20]);
     }
 
     /// Unrouted first, then the pour net, then necked-down track, vias, length.
