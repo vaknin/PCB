@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow, bail};
 
 use crate::board::{Footprint, ORIGIN};
-use crate::gates::{export_netlist, netlist_nets};
+use crate::gates::netlist_nets;
 use crate::geom::{Pt, collides, pt, rotate};
 use crate::layout::{BoardSpec, Side};
 use crate::sexpr::{Kw, Sexp, dumps};
@@ -173,16 +173,16 @@ fn escape_stubs(fp: &Footprint, board: &str, reach: f64) -> Vec<Sexp> {
     out
 }
 
-pub fn build(project_dir: &Path, name: &str, spec: &BoardSpec) -> Result<PathBuf> {
+/// Build the board from KiCad's netlist of the schematic (`gates::export_netlist`).
+pub fn build(project_dir: &Path, name: &str, spec: &BoardSpec, net_tree: &Sexp) -> Result<PathBuf> {
     let sch = project_dir.join(format!("{name}.kicad_sch"));
     let pcb_path = project_dir.join(format!("{name}.kicad_pcb"));
-    let net_tree = export_netlist(&sch)?;
     let libs = footprint::lib_paths(project_dir)?;
 
     // "unconnected-(...)" nets are kept: schematic parity expects no-connect pads to carry them
     let mut pad_net: HashMap<(String, String), String> = HashMap::new();
     let mut nets: Vec<String> = vec![];
-    for (nname, pins) in netlist_nets(&net_tree) {
+    for (nname, pins) in netlist_nets(net_tree) {
         for key in pins {
             pad_net.insert(key, nname.clone());
         }

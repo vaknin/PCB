@@ -143,10 +143,9 @@ pub fn netlist_nets(tree: &Sexp) -> Vec<(String, Vec<(String, String)>)> {
 ///
 /// Nets are compared as pin sets (names differ: KiCad prefixes local labels with "/").
 /// Single-pin "unconnected-(...)" nets are KiCad's own names for no-connect pins.
-pub fn netlist(project_dir: &Path, name: &str, c: &Circuit) -> Result<bool> {
-    let tree = export_netlist(&project_dir.join(format!("{name}.kicad_sch")))?;
+pub fn netlist(tree: &Sexp, c: &Circuit) -> bool {
     let mut kicad: HashMap<BTreeSet<(String, String)>, String> = HashMap::new();
-    for (nname, pins) in netlist_nets(&tree) {
+    for (nname, pins) in netlist_nets(tree) {
         if !(nname.starts_with("unconnected-") && pins.len() == 1) {
             kicad.insert(pins.into_iter().collect(), nname);
         }
@@ -174,15 +173,14 @@ pub fn netlist(project_dir: &Path, name: &str, c: &Circuit) -> Result<bool> {
     }
     let ok = only_kicad.is_empty() && only_ours.is_empty();
     println!("== NETLIST: {}", if ok { "PASS" } else { "FAIL" });
-    Ok(ok)
+    ok
 }
 
 /// Every net-class pattern must match a net in KiCad's netlist. A pattern that matches
 /// nothing leaves its nets on Default silently (seen: "USB_D+" vs KiCad's "/USB_D+"),
 /// and every later gate passes on the wrong rules.
-pub fn netclasses(project_dir: &Path, name: &str, rules: &BoardRules) -> Result<bool> {
-    let tree = export_netlist(&project_dir.join(format!("{name}.kicad_sch")))?;
-    let nets: Vec<String> = netlist_nets(&tree).into_iter().map(|n| n.0).collect();
+pub fn netclasses(tree: &Sexp, rules: &BoardRules) -> bool {
+    let nets: Vec<String> = netlist_nets(tree).into_iter().map(|n| n.0).collect();
     let dead: Vec<String> = rules
         .classes
         .iter()
@@ -194,5 +192,5 @@ pub fn netclasses(project_dir: &Path, name: &str, rules: &BoardRules) -> Result<
         println!("   OPEN:   net-class pattern matches no net: {d}");
     }
     println!("== NETCLASSES: {}", if dead.is_empty() { "PASS" } else { "FAIL" });
-    Ok(dead.is_empty())
+    dead.is_empty()
 }
