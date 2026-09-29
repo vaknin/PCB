@@ -21,7 +21,7 @@ fn cli(args: &[&str]) -> Result<String> {
     Ok(format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
 }
 
-fn violations(report: &Value) -> Vec<Value> {
+pub fn violations(report: &Value) -> Vec<Value> {
     if let Some(sheets) = report["sheets"].as_array() {
         return sheets.iter().flat_map(|s| s["violations"].as_array().cloned().unwrap_or_default()).collect();
     }
@@ -43,7 +43,7 @@ fn s(v: &Value) -> &str {
 }
 
 /// (open, waived with its reason): errors are never waived.
-fn classify<'v, 'w>(violations: &'v [Value], waivers: &'w [Waiver]) -> (Vec<&'v Value>, Vec<(&'v Value, &'w str)>) {
+pub fn classify<'v, 'w>(violations: &'v [Value], waivers: &'w [Waiver]) -> (Vec<&'v Value>, Vec<(&'v Value, &'w str)>) {
     let (mut open, mut waived) = (vec![], vec![]);
     for v in violations {
         if s(&v["severity"]) == "ignore" {

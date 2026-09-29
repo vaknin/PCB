@@ -1,0 +1,582 @@
+//! The review page for one design round (D-022 step 4, D-023): one self-contained HTML
+//! file, `<board>/review/index.html` (gitignored), for the owner. Plain language, no
+//! schematic. It reads what the other stages left behind and never re-runs them:
+//! `kicad/reports/{gates,erc,drc,routing}.json`, `fab/<name>-bom.csv`, `fab/cost.json`,
+//! `fab/README.md`, the board's `board.toml`, `spec.md` and `round.md` (Claude's notes for
+//! the round: what changed and why, open risks), and git for the changes since the last
+//! `<name>-draft-*` tag. Missing inputs show as "not run", never as a pass.
+//!
+//! The file is written as an Artifact page body (no <html>/<head>; the publisher wraps it).
+
+use std::fmt::Write as _;
+use std::path::Path;
+use std::process::Command;
+
+use anyhow::Result;
+use regex::Regex;
+use serde_json::Value;
+
+use crate::boardfile::{BoardFile, GATES};
+use crate::circuit::Circuit;
+use crate::cost;
+use crate::gates::{classify, violations};
+use crate::layout::Waiver;
+
+pub struct Inputs<'a> {
+    /// The board's crate directory (board.toml, spec.md, round.md, git).
+    pub dir: &'a Path,
+    /// Where kicad/ and fab/ are (the board directory, or --out).
+    pub base: &'a Path,
+    pub circuit: &'a Circuit,
+    pub board_file: Option<&'a BoardFile>,
+    pub waivers: &'a [Waiver],
+}
+
+/// Plain-language names of the gates.
+fn gate_label(g: &str) -> &'static str {
+    match g {
+        "netlist" => "The drawing matches the circuit code",
+        "netclasses" => "Track-width rules reach the right connections",
+        "board_toml" => "Pins, power budget and requirements agree",
+        "erc" => "Electrical rules (ERC)",
+        "drc" => "JLCPCB's manufacturing rules (DRC)",
+        "routing" => "Every connection is routed",
+        _ => "unknown check",
+    }
+}
+
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn read_json(p: &Path) -> Option<Value> {
+    serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
+}
+
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim_end().to_string())
+}
+
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            s.push(if i <= c.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    s
+}
+
+/// One side of the board as an SVG data URI (kicad-cli), or None if it can't be drawn.
+fn render(pcb: &Path, layers: &str, mirror: bool) -> Option<String> {
+    let tmp = std::env::temp_dir().join(format!("pcbgen-review-{}-{mirror}.svg", std::process::id()));
+    let (pcb_s, tmp_s) = (pcb.to_string_lossy(), tmp.to_string_lossy());
+    let mut args = vec!["pcb", "export", "svg", "--mode-single", "--fit-page-to-board", "--exclude-drawing-sheet", "-l", layers];
+    if mirror {
+        args.push("--mirror");
+    }
+    args.extend(["-o", &tmp_s, &pcb_s]);
+    crate::kicad_cli(&args).ok()?;
+    let svg = std::fs::read(&tmp).ok()?;
+    let _ = std::fs::remove_file(&tmp);
+    Some(format!("data:image/svg+xml;base64,{}", base64(&svg)))
+}
+
+/// Just enough Markdown for round.md: headings, list items (one level of nesting),
+/// paragraphs, `code` and **bold**. Everything is escaped first.
+pub fn markdown(md: &str) -> String {
+    let code = Regex::new(r"`([^`]+)`").unwrap();
+    let bold = Regex::new(r"\*\*([^*]+)\*\*").unwrap();
+    let inline = |s: &str| bold.replace_all(&code.replace_all(&esc(s), "<code>$1</code>"), "<strong>$1</strong>").into_owned();
+    let (mut html, mut para, mut depth) = (String::new(), Vec::<String>::new(), 0usize);
+    let flush = |html: &mut String, para: &mut Vec<String>| {
+        if !para.is_empty() {
+            *html += &format!("<p>{}</p>\n", inline(&para.join(" ")));
+            para.clear();
+        }
+    };
+    let close = |html: &mut String, depth: &mut usize, to: usize| {
+        while *depth > to {
+            *html += "</ul>\n";
+            *depth -= 1;
+        }
+    };
+    for line in md.lines() {
+        let t = line.trim_start();
+        let indent = line.len() - t.len();
+        if let Some(item) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+            flush(&mut html, &mut para);
+            let want = if indent >= 2 { 2 } else { 1 };
+            close(&mut html, &mut depth, want);
+            while depth < want {
+                html += "<ul>\n";
+                depth += 1;
+            }
+            html += &format!("<li>{}</li>\n", inline(item));
+            continue;
+        }
+        close(&mut html, &mut depth, 0);
+        if t.is_empty() {
+            flush(&mut html, &mut para);
+        } else if let Some(h) = t.strip_prefix('#') {
+            flush(&mut html, &mut para);
+            let level = 1 + h.chars().take_while(|&c| c == '#').count();
+            let text = h.trim_start_matches('#').trim();
+            html += &format!("<h{0}>{1}</h{0}>\n", (level + 2).min(6), inline(text));
+        } else {
+            para.push(t.to_string());
+        }
+    }
+    flush(&mut html, &mut para);
+    close(&mut html, &mut depth, 0);
+    html
+}
+
+/// Bullets under a `## <heading>` of fab/README.md.
+fn readme_list(readme: &str, heading: &str) -> Vec<String> {
+    let mut on = false;
+    let mut out = vec![];
+    for line in readme.lines() {
+        if line.starts_with("## ") {
+            on = line.starts_with(heading);
+        } else if on && let Some(item) = line.strip_prefix("- ") {
+            out.push(item.to_string());
+        }
+    }
+    out
+}
+
+fn money(v: &Value) -> String {
+    v.as_f64().map_or("?".into(), |x| format!("${x:.2}"))
+}
+
+fn chip(state: &str, text: &str) -> String {
+    format!("<span class=\"chip {state}\">{}</span>", esc(text))
+}
+
+/// Builds the page and writes `<base>/review/index.html`.
+pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
+    let c = i.circuit;
+    let name = &c.name;
+    let kicad = i.base.join("kicad");
+    let reports = kicad.join("reports");
+    let fab = i.base.join("fab");
+    let pcb = kicad.join(format!("{name}.kicad_pcb"));
+    let bf = i.board_file;
+    let mut risks: Vec<String> = vec![]; // escaped HTML, one item each
+
+    // --- git: where this round stands -----------------------------------------------
+    let head = git(i.dir, &["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "?".into());
+    let dirty = git(i.dir, &["status", "--porcelain", "--", ".", ":!review"]).is_some_and(|s| !s.is_empty());
+    let at_head = git(i.dir, &["tag", "--points-at", "HEAD", "-l", &format!("{name}-*")]).unwrap_or_default();
+    let draft_n = |t: &str| t.strip_prefix(&format!("{name}-draft-")).and_then(|n| n.parse::<u32>().ok());
+    let mut drafts: Vec<(u32, String)> = git(i.dir, &["tag", "-l", &format!("{name}-draft-*")])
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|t| draft_n(t).map(|n| (n, t.to_string())))
+        .collect();
+    drafts.sort();
+    let this_draft = at_head.lines().find(|t| draft_n(t).is_some()).map(str::to_string);
+    let frozen = at_head.lines().find(|t| t.ends_with("-freeze")).map(str::to_string);
+    let prev = drafts.iter().rev().map(|d| &d.1).find(|t| Some(*t) != this_draft.as_ref()).cloned();
+    let round = match (&frozen, &this_draft, dirty) {
+        (Some(f), _, false) => format!("Frozen ({f})"),
+        (_, Some(d), false) => format!("Round {}", draft_n(d).unwrap()),
+        _ => format!("Round {} (in progress)", drafts.last().map_or(1, |d| d.0 + 1)),
+    };
+    if dirty {
+        risks.push("Uncommitted changes: this page shows work in progress, not a tagged round.".into());
+    }
+
+    // --- gates -------------------------------------------------------------------------
+    let gates = read_json(&reports.join("gates.json"));
+    let stale = match (std::fs::metadata(reports.join("gates.json")), std::fs::metadata(&pcb)) {
+        (Ok(g), Ok(p)) => p.modified()? > g.modified()?,
+        _ => false,
+    };
+    if stale {
+        risks.push("The board file changed after the last full check; re-run <code>check</code>.".into());
+    }
+    let gate_ok = |g: &str| gates.as_ref().and_then(|v| v[g].as_bool());
+    let all_pass = gates.is_some() && !stale && GATES.iter().all(|g| gate_ok(g) == Some(true));
+
+    let mut checks = String::new();
+    for g in GATES {
+        let (state, word) = match gate_ok(g) {
+            Some(true) if !stale => ("ok", "Pass"),
+            Some(true) => ("warn", "Pass, stale"),
+            Some(false) => ("bad", "Fail"),
+            None => ("warn", "Not run"),
+        };
+        let mut detail = String::new();
+        if (g == "erc" || g == "drc")
+            && let Some(rep) = read_json(&reports.join(format!("{g}.json")))
+        {
+                let all = violations(&rep);
+                let (open, waived) = classify(&all, i.waivers);
+                detail = format!("{} open, {} waived", open.len(), waived.len());
+                for (v, why) in &waived {
+                    risks.push(format!(
+                        "Accepted {} warning <code>{}</code> ({}): {}",
+                        g.to_uppercase(),
+                        esc(v["type"].as_str().unwrap_or("")),
+                        esc(v["description"].as_str().unwrap_or("")),
+                        esc(why)
+                    ));
+                }
+        }
+        if g == "routing"
+            && let Some(r) = read_json(&reports.join("routing.json"))
+        {
+            let len: f64 = r["track_length_mm"].as_object().map_or(0.0, |m| m.values().filter_map(Value::as_f64).sum());
+            detail = format!("{} unrouted, {} vias, {:.0} mm of track", r["unrouted_connections"], r["vias_total"], len);
+        }
+        let _ = writeln!(
+            checks,
+            "<tr><td>{}</td><td>{}</td><td class=\"muted\">{}</td></tr>",
+            esc(gate_label(g)),
+            chip(state, word),
+            esc(&detail)
+        );
+    }
+
+    // --- parts and cost ------------------------------------------------------------------
+    let bom = cost::read_bom(&fab.join(format!("{name}-bom.csv"))).unwrap_or_default();
+    let costj = read_json(&fab.join("cost.json"));
+    let budget = bf.and_then(|b| b.order.budget_usd);
+    let mut parts = String::new();
+    for (comment, refs, lcsc) in &bom {
+        let line = costj.as_ref().and_then(|j| j["lines"].as_array()?.iter().find(|l| l["lcsc"] == lcsc.as_str()).cloned());
+        let (lib, unit, total, stock) = match &line {
+            Some(l) => (
+                l["library"].as_str().unwrap_or("").to_string(),
+                l["unit_usd"].as_f64().map_or("".into(), |u| format!("${u:.4}")),
+                money(&l["line_usd"]),
+                l["stock"].to_string(),
+            ),
+            None => Default::default(),
+        };
+        if line.as_ref().is_some_and(|l| l["short"] == true) {
+            risks.push(format!("Not enough JLCPCB stock of {} ({}).", esc(lcsc), esc(comment)));
+        }
+        let lib_chip = match lib.as_str() {
+            "extended" => chip("warn", "Extended +$3.07"),
+            "preferred" => chip("ok", "Preferred"),
+            "basic" => chip("ok", "Basic"),
+            _ => String::new(),
+        };
+        let _ = writeln!(
+            parts,
+            "<tr><td>{}</td><td>{}</td><td><code>{}</code></td><td>{lib_chip}</td><td class=\"num\">{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td></tr>",
+            esc(comment),
+            esc(&refs.join(", ")),
+            esc(lcsc),
+            esc(&stock),
+            esc(&unit),
+            esc(&total)
+        );
+    }
+    let (cost_head, cost_body) = match &costj {
+        Some(j) => {
+            let t = &j["totals_usd"];
+            let per = t["per_design"].as_f64().unwrap_or(0.0);
+            let vs = match budget {
+                Some(b) if per > b => {
+                    risks.push(format!("Over budget: ${per:.2} per design against ${b:.2}."));
+                    format!(" against a ${b:.0} budget: <strong>over by ${:.2}</strong>", per - b)
+                }
+                Some(b) => format!(" against a ${b:.0} budget: ${:.2} to spare", b - per),
+                None => " (no budget set in board.toml)".into(),
+            };
+            let alone = &j["alone_in_a_parcel_usd"];
+            (
+                format!("{} per design", money(&t["per_design"])),
+                format!(
+                    "<p>{} bare boards, {} assembled, prices fetched {}{vs}.</p>\n<dl class=\"sums\">\
+                     <dt>Parts</dt><dd>{}</dd><dt>Extended-part fees ({})</dt><dd>{}</dd>\
+                     <dt>PCB, setup, stencil</dt><dd>{}</dd><dt>Solder joints</dt><dd>{}</dd>\
+                     <dt>Per design</dt><dd class=\"total\">{}</dd></dl>\n\
+                     <p class=\"muted\">Shipping (about {} by FedEx) and Israeli VAT are paid once per parcel, which several designs share. \
+                     Shipped alone this design would come to {} delivered.</p>",
+                    j["order"]["bare_boards"],
+                    j["order"]["assembled"],
+                    esc(j["date"].as_str().unwrap_or("?")),
+                    money(&t["parts"]),
+                    t["extended_parts"].as_array().map_or(0, |a| a.len()),
+                    money(&t["extended_fees"]),
+                    money(&t["pcb_setup_stencil"]),
+                    money(&t["joints"]),
+                    money(&t["per_design"]),
+                    money(&alone["shipping_fedex"]),
+                    money(&alone["total"]),
+                ),
+            )
+        }
+        None => (
+            "not computed".into(),
+            "<p>Not computed for this round: run the <code>cost</code> stage (it fetches live JLCPCB prices). \
+             Fixed fees per design: PCB $4.00, assembly setup $8.18, stencil $1.53, plus $3.07 for each Extended part.</p>"
+                .into(),
+        ),
+    };
+
+    // --- risks the pipeline knows about ----------------------------------------------
+    let readme = std::fs::read_to_string(fab.join("README.md")).unwrap_or_default();
+    let unverified = readme_list(&readme, "## Rotation UNVERIFIED");
+    if !unverified.is_empty() {
+        let list: Vec<String> = unverified.iter().map(|u| esc(u.split(' ').next().unwrap_or(u))).collect();
+        risks.push(format!(
+            "Placement angle not yet confirmed for {} parts ({}); check each in JLCPCB's placement preview before paying.",
+            list.len(),
+            list.join(", ")
+        ));
+    }
+    if bom.is_empty() {
+        risks.push("No fab files yet (run the <code>fab</code> stage).".into());
+    }
+
+    // --- board.toml: requirements and power ----------------------------------------------
+    let (mut reqs, mut power, mut power_head) = (String::new(), String::new(), "no board.toml".to_string());
+    if let Some(bf) = bf {
+        for r in &bf.requirements {
+            let covers: Vec<String> = r.covered_by.iter().map(|cov| describe_cover(cov, c, bf, &gate_ok, stale)).collect();
+            let _ = writeln!(reqs, "<tr><td class=\"rid\">{}</td><td>{}</td><td>{}</td></tr>", esc(&r.id), esc(&r.text), covers.join(" "));
+        }
+        let total: f64 = bf.power.loads.iter().map(|l| l.ma).sum();
+        power_head = format!("{total:.0} of {:.0} mA", bf.power.budget_ma);
+        for l in &bf.power.loads {
+            let guess = l.source.contains("INFERRED");
+            let _ = writeln!(
+                power,
+                "<tr><td>{}</td><td class=\"num\">{}</td><td class=\"muted\">{}{}</td></tr>",
+                esc(&l.name),
+                l.ma,
+                if guess { chip("warn", "estimate") + " " } else { String::new() },
+                esc(&l.source)
+            );
+        }
+        let _ = writeln!(
+            power,
+            "<tr class=\"sum\"><td>Total, worst case</td><td class=\"num\">{total:.1}</td><td>of {} mA from {}: {:.1} mA to spare</td></tr>",
+            bf.power.budget_ma,
+            esc(&bf.power.source),
+            bf.power.budget_ma - total
+        );
+        let guesses = bf.power.loads.iter().filter(|l| l.source.contains("INFERRED")).count();
+        if guesses > 0 {
+            risks.push(format!("{guesses} of the power figures are estimates, not datasheet values."));
+        }
+    }
+
+    // --- changes since the last round ------------------------------------------------------
+    // the board, and the shared code and libraries that can change it (in this repo's layout)
+    let paths: Vec<&str> = [".", "../../crates/pcbgen", "../../lib", "../../rules"].into_iter().filter(|p| i.dir.join(p).exists()).collect();
+    let changes = match &prev {
+        Some(p) => {
+            let range = format!("{p}..HEAD");
+            let mut args = vec!["log", "--format=%h %s", &range, "--"];
+            args.extend(paths);
+            let log = git(i.dir, &args).unwrap_or_default();
+            let items: Vec<String> = log.lines().map(|l| format!("<li><code>{}</code>{}</li>", esc(&l[..l.find(' ').unwrap_or(0)]), esc(&l[l.find(' ').unwrap_or(0)..]))).collect();
+            if items.is_empty() {
+                format!("<p>No commits touch this board since <code>{}</code>.</p>", esc(p))
+            } else {
+                format!("<p>Commits since <code>{}</code>:</p>\n<ul class=\"log\">{}</ul>", esc(p), items.join("\n"))
+            }
+        }
+        None => "<p>This is the first round: no earlier <code>draft</code> tag to compare with.</p>".into(),
+    };
+    let notes = std::fs::read_to_string(i.dir.join("round.md")).map(|m| markdown(&m)).unwrap_or_else(|_| {
+        risks.push("No <code>round.md</code>: nothing written about why things changed this round.".into());
+        String::new()
+    });
+
+    let firmware = if i.dir.join("firmware/wokwi.toml").exists() {
+        "A Wokwi simulation project is in <code>firmware/</code>."
+    } else {
+        "Not set up yet. It comes with the first firmware (ESP-IDF in Wokwi), wired to the pin map above."
+    };
+
+    // --- pictures ---------------------------------------------------------------------------
+    let top = render(&pcb, "F.Cu,B.Cu,F.Fab,F.Courtyard,F.SilkS,Edge.Cuts", false);
+    let bottom = render(&pcb, "B.Cu,B.Fab,B.Courtyard,B.SilkS,Edge.Cuts", true);
+    let pic = |uri: &Option<String>, what: &str| match uri {
+        Some(u) => format!("<figure><img src=\"{u}\" alt=\"{what} of the board\"><figcaption>{what}</figcaption></figure>"),
+        None => format!("<figure class=\"none\"><figcaption>{what}: no board file to draw</figcaption></figure>"),
+    };
+
+    // --- summary chips ------------------------------------------------------------------------
+    let checks_chip = if gates.is_none() {
+        chip("warn", "Checks not run")
+    } else if all_pass {
+        chip("ok", "All checks pass")
+    } else {
+        chip("bad", "Checks failing")
+    };
+    let cost_state = match (&costj, budget) {
+        (None, _) => "warn",
+        (Some(j), Some(b)) if j["totals_usd"]["per_design"].as_f64().unwrap_or(0.0) > b => "bad",
+        _ => "ok",
+    };
+    let risk_list: String = risks.iter().map(|r| format!("<li>{r}</li>\n")).collect();
+    let title = format!("{} review", c.title);
+    let date = crate::schematic::today();
+
+    let mut h = String::new();
+    h += &format!("<title>{}</title>\n", esc(&title));
+    h += STYLE;
+    let _ = write!(
+        h,
+        "<main>\n<header>\n<p class=\"eyebrow\">{} · revision {} · {}</p>\n<h1>{}</h1>\n<p class=\"meta\">Commit <code>{head}</code>{}, page made {date}</p>\n\
+         <div class=\"chips\">{checks_chip}{}{}{}</div>\n</header>\n",
+        esc(name),
+        esc(&c.rev),
+        esc(&round),
+        esc(&c.title),
+        if dirty { " with uncommitted changes" } else { "" },
+        chip(cost_state, &format!("Cost: {cost_head}")),
+        chip("ok", &format!("Power: {power_head}")),
+        chip(if risks.is_empty() { "ok" } else { "warn" }, &format!("{} things to check", risks.len())),
+    );
+    let _ = writeln!(h, "<section class=\"pics\">{}{}</section>", pic(&top, "Top"), pic(&bottom, "Bottom, seen from below"));
+    let _ = writeln!(h, "<section><h2>This round</h2>\n{notes}\n{changes}\n</section>");
+    let _ = writeln!(h, "<section><h2>Things to check</h2>\n<ul class=\"risks\">\n{risk_list}</ul>\n</section>");
+    let _ = write!(
+        h,
+        "<section><h2>What it must do</h2>\n<p class=\"muted\">From <code>spec.md</code>; each line names what shows it is met.</p>\n\
+         <div class=\"scroll\"><table><thead><tr><th>ID</th><th>Requirement</th><th>Covered by</th></tr></thead><tbody>\n{reqs}</tbody></table></div>\n</section>\n"
+    );
+    let _ = writeln!(h, "<section><h2>Cost</h2>\n{cost_body}\n<div class=\"scroll\"><table class=\"parts\"><thead><tr><th>Part</th><th>On the board</th><th>LCSC</th><th>Library</th><th class=\"num\">JLCPCB stock</th><th class=\"num\">Each</th><th class=\"num\">Line</th></tr></thead><tbody>\n{parts}</tbody></table></div>\n</section>");
+    let _ = writeln!(h, "<section><h2>Power budget</h2>\n<div class=\"scroll\"><table><thead><tr><th>Load</th><th class=\"num\">mA</th><th>Source</th></tr></thead><tbody>\n{power}</tbody></table></div>\n</section>");
+    let _ = writeln!(h, "<section><h2>Checks</h2>\n<div class=\"scroll\"><table><tbody>\n{checks}</tbody></table></div>\n</section>");
+    let _ = writeln!(h, "<section><h2>Firmware in simulation</h2>\n<p>{firmware}</p>\n</section>\n</main>");
+
+    let dir = i.base.join("review");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("index.html");
+    std::fs::write(&path, h)?;
+    Ok(path)
+}
+
+/// One `covered_by` entry in words, as a chip.
+fn describe_cover(cov: &str, c: &Circuit, bf: &BoardFile, gate_ok: &dyn Fn(&str) -> Option<bool>, stale: bool) -> String {
+    let (kind, x) = cov.split_once(':').unwrap_or(("", cov));
+    match kind {
+        "part" => {
+            let value = c.find_part(x).map(|p| c.parts[p.0].value.as_str()).unwrap_or("?");
+            format!("<span class=\"cov\">{} <span class=\"muted\">{}</span></span>", esc(x), esc(value))
+        }
+        "pin" => {
+            let g = bf.pins.iter().find(|p| p.signal == x).map_or(String::new(), |p| format!(" GPIO {}", p.gpio));
+            format!("<span class=\"cov\">{}<span class=\"muted\">{g}</span></span>", esc(x))
+        }
+        "test" => format!("<span class=\"cov\">self-test <span class=\"muted\">{}</span></span>", esc(x)),
+        "gate" => {
+            let state = match gate_ok(x) {
+                Some(true) if !stale => "ok",
+                Some(false) => "bad",
+                _ => "warn",
+            };
+            chip(state, gate_label(x))
+        }
+        _ => esc(cov),
+    }
+}
+
+/// Board-house palette: soldermask-green neutrals, copper accent; pictures on white.
+const STYLE: &str = r#"<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* One column of stacked sections; summary chips first, then pictures, then detail tables. */
+:root {
+  --bg: #f5f7f4; --surface: #ffffff; --fg: #1c2620; --muted: #5d6b62; --line: #d9e0da;
+  --accent: #a4561c; --paper: #ffffff;
+  --ok-bg: #dcefe2; --ok-fg: #1d5c33; --warn-bg: #f7ead2; --warn-fg: #7a4b0c; --bad-bg: #f6d9d6; --bad-fg: #8c231a;
+  --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111814; --surface: #18211c; --fg: #e3ebe5; --muted: #98a89e; --line: #2a372f;
+  --accent: #e0925a; --paper: #f4f6f3;
+  --ok-bg: #1e3a28; --ok-fg: #a6dcb6; --warn-bg: #3d2f16; --warn-fg: #f0c987; --bad-bg: #45201c; --bad-fg: #f3aaa2;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #111814; --surface: #18211c; --fg: #e3ebe5; --muted: #98a89e; --line: #2a372f;
+  --accent: #e0925a; --paper: #f4f6f3;
+  --ok-bg: #1e3a28; --ok-fg: #a6dcb6; --warn-bg: #3d2f16; --warn-fg: #f0c987; --bad-bg: #45201c; --bad-fg: #f3aaa2;
+  color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); }
+main { max-width: 60rem; margin: 0 auto; padding-inline: 16px; padding-block: 2rem 4rem; display: grid; gap: 2.25rem; }
+main > * { min-width: 0; }
+header { display: grid; gap: .5rem; }
+h1, h2, h3, h4, h5 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 2.3rem; }
+h2 { font-size: 1.45rem; padding-bottom: .35rem; border-bottom: 2px solid var(--accent); margin-bottom: .75rem; }
+h3, h4, h5 { font-size: 1.15rem; margin-top: 1rem; }
+p { margin: .5rem 0; max-width: 68ch; }
+.eyebrow { text-transform: uppercase; letter-spacing: .08em; font-size: .78rem; color: var(--accent); font-weight: 600; margin: 0; }
+.meta, .muted { color: var(--muted); }
+.meta { margin: 0; font-size: .9rem; }
+code { font-family: var(--mono); font-size: .88em; }
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.chip { display: inline-block; padding: .15rem .6rem; border-radius: 999px; font-size: .82rem; font-weight: 500; white-space: nowrap; }
+.chips .chip { font-size: .92rem; padding: .3rem .8rem; }
+.chip.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.chip.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.pics { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; }
+figure { margin: 0; display: grid; gap: .4rem; }
+figure img { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; width: 100%; height: auto; padding: .75rem; box-sizing: border-box; }
+figure.none { border: 1px dashed var(--line); border-radius: 6px; padding: 2rem 1rem; text-align: center; }
+figcaption { font-size: .85rem; color: var(--muted); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+th, td { padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.sum td { font-weight: 600; border-bottom: none; }
+.rid { font-family: var(--mono); font-weight: 500; color: var(--accent); }
+td .cov, td .chip { margin: 0 .35rem .3rem 0; }
+.cov { display: inline-block; font-size: .85rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 .4rem; background: var(--surface); }
+ul { padding-left: 1.2rem; margin: .5rem 0; }
+li { margin: .25rem 0; max-width: 72ch; }
+ul.risks li::marker { color: var(--accent); }
+ul.log { list-style: none; padding: 0; }
+ul.log code { color: var(--accent); margin-right: .5rem; }
+dl.sums { display: grid; grid-template-columns: max-content max-content; gap: .2rem 1.5rem; margin: .75rem 0; font-variant-numeric: tabular-nums; }
+dl.sums dt { color: var(--muted); }
+dl.sums dd { margin: 0; text-align: right; }
+dl.sums .total { font-weight: 600; color: var(--accent); }
+</style>
+"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_matches_rfc4648() {
+        for (i, o) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
+            assert_eq!(base64(i.as_bytes()), o);
+        }
+    }
+
+    #[test]
+    fn markdown_subset() {
+        let h = markdown("## What changed\nMoved **U4** away\nfrom `U2`.\n\n- one <b>\n  - nested\n- two\n\ntext");
+        assert_eq!(
+            h,
+            "<h4>What changed</h4>\n<p>Moved <strong>U4</strong> away from <code>U2</code>.</p>\n<ul>\n<li>one &lt;b&gt;</li>\n<ul>\n<li>nested</li>\n</ul>\n<li>two</li>\n</ul>\n<p>text</p>\n"
+        );
+    }
+
+    #[test]
+    fn readme_bullets_under_a_heading() {
+        let r = "# x\n## Rotation corrections applied\n- J1: a\n## Rotation UNVERIFIED (no known)\n\n- D1 (LED)\n- U1 (ESP)\n## Other\n- no\n";
+        assert_eq!(readme_list(r, "## Rotation UNVERIFIED"), vec!["D1 (LED)", "U1 (ESP)"]);
+    }
+}

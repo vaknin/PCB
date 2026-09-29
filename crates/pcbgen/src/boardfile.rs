@@ -37,6 +37,35 @@ pub struct BoardFile {
     pub requirements: Vec<Requirement>,
     #[serde(default)]
     pub firmware: Firmware,
+    #[serde(default)]
+    pub order: Order,
+}
+
+/// How the board would be ordered (D-021 option A: its own JLCPCB order in a shared parcel).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Order {
+    /// Bare PCBs made (JLCPCB's smallest batch is 5).
+    #[serde(default = "five")]
+    pub boards: u64,
+    /// Of those, how many JLCPCB assembles (Economic PCBA: 2 to 50).
+    #[serde(default = "two")]
+    pub assembled: u64,
+    /// The owner's budget for this design, USD, before shipping and VAT; None if not set.
+    pub budget_usd: Option<f64>,
+}
+
+fn five() -> u64 {
+    5
+}
+fn two() -> u64 {
+    2
+}
+
+impl Default for Order {
+    fn default() -> Self {
+        Order { boards: 5, assembled: 2, budget_usd: None }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,6 +263,15 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
         p.push("power.budget_ma must be more than 0".into());
     } else if total > bf.power.budget_ma {
         p.push(format!("power: loads total {total} mA, over the {} mA budget", bf.power.budget_ma));
+    }
+
+    // --- order ------------------------------------------------------------------
+    let o = &bf.order;
+    if !(2..=50).contains(&o.assembled) || o.assembled > o.boards {
+        p.push(format!("order: {} assembled of {} boards; JLCPCB Economic assembles 2 to 50, at most the boards made", o.assembled, o.boards));
+    }
+    if o.budget_usd.is_some_and(|b| !(b.is_finite() && b > 0.0)) {
+        p.push("order.budget_usd must be more than 0".into());
     }
 
     // --- firmware self-tests ---------------------------------------------------
@@ -479,6 +517,7 @@ self_test = ["sensor"]
         one("net = \"SDA\"", "net = \"SCL\"", "on net SDA, not SCL");
         one("signal = \"BOOT\"", "signal = \"Boot\"", "upper-case C identifier");
         one("budget_ma = 500", "budget_ma = 300", "over the 300 mA budget");
+        one("[firmware]", "[order]\nassembled = 6\n\n[firmware]", "6 assembled of 5 boards");
         one("\"gate:drc\"", "\"gate:lint\"", "gates are");
         one("\"part:R1\"", "\"part:R9\"", "no such part");
         one("\"pin:I2C_SDA\"", "\"pin:I2C_SCL\"", "no such signal");

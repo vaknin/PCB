@@ -1,5 +1,5 @@
 //! Pipeline driver, called by each board's `main`:
-//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [--out DIR] [--tries N]`
+//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [cost] [review] [--out DIR] [--tries N]`
 //!
 //! Stages run in this order whatever order they are named in (default: all). Generated
 //! KiCad files go to `<board>/kicad/` and fab files to `<board>/fab/`; `--out DIR` puts
@@ -8,6 +8,8 @@
 //!
 //! A board with a `board.toml` (D-023) gets the BOARD.TOML gate in `sch`, `check` and `fw`;
 //! `fw` writes the firmware's pin header to `<board>/firmware/board_pins.h`.
+//! `cost` (live JLCPCB prices, needs the network) and `review` (the owner's review page,
+//! `<board>/review/index.html`) run only when named.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -17,9 +19,11 @@ use anyhow::{Result, bail};
 use crate::circuit::Circuit;
 use crate::layout::Layout;
 use crate::sexpr::Sexp;
-use crate::{boardfile, fab, gates, pcb, project, report, route, schematic};
+use crate::{boardfile, cost, fab, gates, pcb, project, report, review, route, schematic};
 
-pub const STAGES: [&str; 6] = ["sch", "pcb", "route", "check", "fab", "fw"];
+pub const STAGES: [&str; 8] = ["sch", "pcb", "route", "check", "fab", "fw", "cost", "review"];
+/// What runs when no stage is named: everything that builds and checks the design.
+pub const DEFAULT: usize = 6;
 
 pub struct Board {
     /// The board's own directory (its crate).
@@ -64,7 +68,7 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
         }
     }
     if stages.is_empty() {
-        stages = STAGES.to_vec();
+        stages = STAGES[..DEFAULT].to_vec();
     }
     let want = |s: &str| stages.contains(&s);
 
@@ -115,11 +119,18 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
     }
     if want("check") {
         let tree = cached(&mut net_tree, &sch_path)?;
-        let n = gates::netlist(tree, &circuit) & gates::netclasses(tree, &layout.rules) & board_toml(&circuit)?;
+        let (nl, nc) = (gates::netlist(tree, &circuit), gates::netclasses(tree, &layout.rules));
+        let b = board_toml(&circuit)?;
         let e = gates::erc(&out, &name, &layout.waivers)?;
         let d = gates::drc(&out, &name, &layout.waivers)?; // refills zones and saves the board
         let r = report::run(&out, &name, &layout.rules)?;
-        if !(n && e && d && r) {
+        // for the review page: which gates passed, and when (after DRC saved the board)
+        let summary = serde_json::json!({
+            "date": crate::schematic::today(),
+            "netlist": nl, "netclasses": nc, "board_toml": b, "erc": e, "drc": d, "routing": r,
+        });
+        std::fs::write(out.join("reports/gates.json"), serde_json::to_string_pretty(&summary)? + "\n")?;
+        if !(nl && nc && b && e && d && r) {
             return Ok(false);
         }
     }
@@ -141,6 +152,14 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
                 println!("fw: {}", path.display());
             }
         }
+    }
+    if want("cost") {
+        let (boards, assembled) = board_file.as_ref().map_or((5, 2), |b| (b.order.boards, b.order.assembled));
+        cost::run(&out, &name, &base.join("fab"), boards, assembled)?;
+    }
+    if want("review") {
+        let inputs = review::Inputs { dir: &board.dir, base: &base, circuit: &circuit, board_file: board_file.as_ref(), waivers: &layout.waivers };
+        println!("review: {}", review::write(&inputs)?.display());
     }
     Ok(true)
 }
