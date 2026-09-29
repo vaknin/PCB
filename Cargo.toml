@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/pcbgen", "boards/*"]
+# spec only so far (D-024); drop this when boards/capture-clip gets its crate
+exclude = ["boards/capture-clip"]
 
 [workspace.package]
 edition = "2024"

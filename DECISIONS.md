@@ -3,6 +3,36 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-024 First project: capture-clip, a battery voice-note button for Capture (DECIDED, brainstorm closed by the owner, 2026-09-29)
+- **Owner's words:** "let's add another user: ESP32, which will be able to capture voice ideas after pressing a button"; then "Build B, add an LED indicator light … I don't want it ordered yet, but maybe some day when I have a few more projects ready to be ordered with it … battery … use it around the house, maybe take it with me … one button suffices … make difference between press and hold, so we can have two functions for it".
+- **Spec:** `boards/capture-clip/spec.md` (R1–R11). The recording length wasn't answered, so it defaults to Capture's own 15-minute cap.
+- **Decided by Claude:**
+  - **The device is a full Capture client.**
+    - It records, calls Gemini itself and writes `notes/<id>.md` to the GitHub notes repo through the REST API, like the phone (Capture SPEC §6, §9: same request, schema, note format, `next-number` counter).
+    - Rejected: uploading raw audio for the laptop to process (it needs the laptop on, and a new inbox path in Capture); streaming to the laptop over the LAN (the same, plus pairing).
+    - Cost: the device holds a Gemini key and a GitHub token, stored in encrypted NVS.
+    - **Owner's call (2026-09-29): reuse Capture's own key and token** ("use same gemini key", "use also the same github token as capture if possible").
+      - The setup step reads `gemini_api_key` and `github_token` from `~/.config/capture-notes/config` and writes them to the device over USB. Claude never prints or copies them elsewhere.
+      - Checked without printing it: the token is fine-grained, expires 2027-09-18, and has push access to `vaknin/capture-notes`.
+      - Its access to other repos was not checked; the permission system refused that as credential exploration.
+      - Risk: a lost device leaks both. The owner revokes them on GitHub and in Google AI Studio, and re-keys the phone and laptop too, since they share them.
+    - **Wokwi CI token** (simulation only, never on the device): `~/.config/wokwi/token` (mode 600), loaded as `WOKWI_CLI_TOKEN` per run.
+  - **Press and hold:**
+    - A press = a new note.
+    - A hold ≥ 1 s = an addition to the last note this device uploaded (Capture SPEC §9 Additions).
+    - The owner asked for two functions; this pair matches the app's two actions. Easy to change in firmware.
+  - **Audio:**
+    - OGG/Opus, 16 kHz mono, 32 kbps: the phone's exact format, already proven with Gemini (Capture SPEC §3), so no Capture-side change.
+    - It is encoded on the ESP32-S3 (Espressif's audio codec component) and stored in a flash partition: 15 min ≈ 3.6 MB.
+    - The N16R8 module's 16 MB leaves room for ≥ 30 min queued plus two OTA slots.
+  - **Module:** ESP32-S3-WROOM-1-N16R8 again (verified pads, footprint and pipeline). The smaller MINI-1 would save ~5 mm but needs a new GPIO table and footprint check, and the battery sets the size anyway.
+  - **The main button is on IO0.** It doubles as BOOT (hold while powering up = download mode), and IO0 is an RTC GPIO, so it wakes the chip from deep sleep. That saves a second button.
+  - **Setup over USB.** Wi-Fi credentials, keys and the repo are pushed from the laptop over USB serial (a `capture-notes` subcommand later), so there is no on-device UI or captive portal.
+  - **Note source:** the device writes `source: clip`.
+    - VERIFIED 2026-09-29 that Capture carries any `source` value through unchanged: the phone's `sync/NoteFile.kt` reads it as a free string (default "phone") and writes it back as read; the laptop's `desktop/capture-notes` does the same (default "laptop"); nothing branches on it.
+    - No Capture change is needed.
+- **Not ordered;** it waits to share a parcel (D-021). Parts research: `research/2026-09-29-parts-capture-clip.md`.
+
 ## D-023 Workflow tooling built: board.toml gate, firmware pin header, cost and review stages, templates, draft/freeze tags (DECIDED, owner approved building it, 2026-09-29)
 - **Owner's words:** "I like how you handled each, especially the .toml file. let's do that. write all of these suggestions, regarding your questions, go with your recommendation and best practices."
 - **Where things live:** in the board's crate, not `projects/<name>/`: `boards/<name>/{board.toml, spec.md, round.md, errata-rev<X>.md, firmware/}`. One directory per board keeps the spec next to the code that must match it.
