@@ -3,6 +3,36 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-023 Workflow tooling built: board.toml gate, firmware pin header, cost and review stages, templates, draft/freeze tags (DECIDED, owner approved building it, 2026-09-29)
+- **Owner's words:** "I like how you handled each, especially the .toml file. let's do that. write all of these suggestions, regarding your questions, go with your recommendation and best practices."
+- **Where things live:** in the board's crate, not `projects/<name>/`: `boards/<name>/{board.toml, spec.md, round.md, errata-rev<X>.md, firmware/}`. One directory per board keeps the spec next to the code that must match it.
+- **`board.toml`** (`crates/pcbgen/src/boardfile.rs`, serde with unknown keys rejected): `[board]` name/revision/module, `[[pin]]` signal → module pin, net, GPIO, direction, active-low, `[power]` budget and `[[power.load]]`s each with a source, `[[requirement]]` ID/text/`covered_by`, `[firmware] self_test`, optional `[order]` boards/assembled/budget_usd (default 5/2, D-021).
+- **BOARD.TOML gate** (in `sch`, `check` and `fw`; fails the stage). It checks:
+  - name and revision equal the circuit's; the module part exists and pcbgen has a GPIO table for it
+  - signals unique and upper-case C identifiers; GPIOs and module pins unique
+  - each pin exists on the module symbol (by name), is on the named net, and has the right GPIO: `IOnn` = nn; TXD0/RXD0 = 43/44 (VERIFIED, Espressif WROOM-1 datasheet v1.8 Table 3-1); USB_D−/D+ = 19/20 (VERIFIED, KiCad symbol alternates and HARDWARE_LESSONS)
+  - every module GPIO the circuit connects is in the map
+  - the loads fit the power budget (margin printed)
+  - requirement IDs unique and matching `spec.md`'s both ways; each covered, each `part:`/`pin:`/`test:`/`gate:` reference real; each self-test covers a requirement
+  - `order` quantities within JLCPCB Economic's 2–50
+  - Only ESP32-S3-WROOM-1 has a GPIO table. Another module makes the gate fail with "add one", rather than guess.
+- **Existing `Circuit::net_of(part, &Pin)` is used;** the planned `net_of(PinRef)` would have clashed and wasn't needed.
+- **`fw` stage:** writes `firmware/board_pins.h` (ESP-IDF: `PIN_<SIGNAL> GPIO_NUM_<n>`, `_ACTIVE_LOW`, `BOARD_NAME`, `BOARD_REVISION`, `BOARD_SELF_TESTS`). Committed like `fab/`. Checked to compile with `-Wall -Wextra -Werror` against a stub `driver/gpio.h` (ESP-IDF itself isn't installed yet).
+- **Cost: built now, `cost` stage** (`crates/pcbgen/src/cost.rs`), closing that open question for option A.
+  - Why build rather than show "not computed": the owner sees cost against budget every round, and the API from `research/2026-09-29-cost-estimate.md` §1 still answers without a login (checked today).
+  - It prices `fab/<name>-bom.csv` line by line, run through `curl` like kicad-cli (no HTTP crate).
+  - Order quantity = placements for the assembled boards + attrition, at least the minimum (INFERRED model, from the cost estimate). Joints = pads of the assembled parts (INFERRED).
+  - Fixed fees are the VERIFIED ones in HARDWARE_LESSONS. Shipping and VAT are shown separately, since they are per parcel (D-021).
+  - Writes `fab/cost.json` (the fab stage clears `fab/`, so a cost can't outlive its BOM). Needs the network, so it runs only when named. The API is undocumented: a change shows as a fetch or parse error, not a wrong number.
+- **`review` stage** (`crates/pcbgen/src/review.rs`): `<board>/review/index.html` (gitignored), one self-contained page for an Artifact publish.
+  - Contents: top and bottom renders (kicad-cli SVG, embedded); the round (from git tags) and what changed (`round.md` plus commits since the previous draft tag); "things to check"; requirement coverage; cost against budget; the power budget; the checks; firmware simulation status.
+  - "Things to check" is gathered automatically: UNVERIFIED rotations, estimated power figures, waived DRC items, short stock, over budget, stale reports, uncommitted changes, a missing `round.md`.
+  - It reads what other stages wrote and re-runs nothing. `check` now writes `kicad/reports/gates.json` for it. Anything missing shows as "not run", and a board newer than the last check shows as stale.
+- **Tags:** `scripts/draft.sh <board>` tags `<board>-draft-<n>` (clean tree). `scripts/freeze.sh <board>` tags `<board>-rev<rev>-freeze`, only on a commit that carries a draft tag, so the frozen version is one the owner saw. `scripts/check-frozen.sh <board>` runs before any order: the freeze tag exists and the board directory is unchanged since it. Tags are local; nothing is pushed.
+- **Templates:** `templates/{spec.md, board.toml, round.md, errata.md}`.
+- **Wokwi: documented, not set up.** It needs ESP-IDF, wokwi-cli and a token. Set up with the first firmware (`firmware/wokwi.toml`; the review page notices it).
+- **Starter retrofit:** `boards/starter/{board.toml, spec.md, round.md, firmware/board_pins.h}`. 8 pins, 8 requirements, 4 self-tests, 461 of 500 mA. The power loads the datasheets don't give are marked INFERRED.
+
 ## D-022 Workflow: brainstorm first, spec as Markdown + TOML, simulate instead of prototyping, review rounds before ordering (DECIDED with the owner, 2026-09-29)
 - **Owner's input:**
   - Brainstorming comes first and should last a while.
@@ -20,7 +50,7 @@ Research behind these: `research/2026-09-29-landscape.md`.
   - TOML is what code checks.
   - A new language would add a parser and its bugs without adding accuracy.
   - The accuracy comes from gates that fail when the spec, circuit and firmware disagree.
-- **Not built yet:** the `board.toml` reader, the firmware header generator, the requirement-coverage gate and the review page. Each gets built when the first real project reaches it.
+- **Built since:** the `board.toml` reader and gate, the firmware header, the cost and review stages, templates and tag scripts (D-023).
 
 ## D-021 Ordering several different boards per shipment: separate orders in one parcel (A) for now; a shared panel (B) documented (DECIDED by the owner, 2026-09-29)
 - **The need:** 1–2 copies each of about 5 different boards per shipment, never 5 copies of one board.
@@ -365,7 +395,7 @@ at JLCPCB (the 5-board price covers up to 100×100).
 - **Before a real order (skipped while this is a tooling test, agreed with pcb-99):**
   - a 4-layer routing variant for comparison
   - vendoring the verified footprints into the repo (`lib/footprints/` exists since D-015; only the modified ESP32 footprint is there)
-  - a full JLCPCB parts/cost script
+  - (a JLCPCB parts/cost script: the `cost` stage, D-023; the A/B/C comparison is still open)
   - (project skill: done as the global draft `~/.claude/skills/pcb-pipeline/SKILL.md`, at the owner's request)
   - check every UNVERIFIED rotation in JLCPCB's placement preview (list in `boards/<name>/fab/README.md`)
   - the fab's own manufacturability check on upload; current fab promotions (NextPCB Rev 0 vs JLCPCB); the A/B/C cost table from `docs/brief.md`

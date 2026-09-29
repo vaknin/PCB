@@ -10,19 +10,23 @@ Why this shape: `DECISIONS.md` D-004, D-005, D-010 and D-016 (the Rust port, no 
 
 ## Run
 ```
-cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [--out DIR] [--tries N]
+cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [cost] [review] [--out DIR] [--tries N]
 ```
-With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and `DIR/fab` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each); checking the best 3 adds ~10 s.
+With no stage named, `sch` to `fw` run in order; `cost` (network) and `review` run only when named. `--out DIR` writes `DIR/kicad`, `DIR/fab`, `DIR/firmware` and `DIR/review` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each); checking the best 3 adds ~10 s.
 
 | Stage | Does | Output |
 |---|---|---|
-| sch | writes `.kicad_pro` + `.kicad_dru` (fab rules), then the schematic; refuses if any pin is neither connected nor marked nc; then the netlist round-trip and net-class gates | `kicad/<name>.kicad_sch` |
+| sch | writes `.kicad_pro` + `.kicad_dru` (fab rules), then the schematic; refuses if any pin is neither connected nor marked nc; then the netlist round-trip, net-class and BOARD.TOML gates | `kicad/<name>.kicad_sch` |
 | pcb | exports the netlist from the schematic, loads footprints, places them from the layout, adds outline, GND pours, local copper zones (`CopperZone`), labels, escape stubs; `kicad-cli pcb upgrade --force` re-saves it | `kicad/<name>.kicad_pcb` |
 | route | deletes old unlocked tracks → DSN written by pcbgen (pours hidden from the router) → Freerouting on 8 footprint orders, 4 at a time, fanout off; ranked by fewest unrouted, then least track under class width, fewest vias, shortest → the best 3 are each finished (SES tracks, kicad-cli zone fill, stitching vias for GND and `stitch_local` nets, fill) and DRC-checked in `route/try-<n>/check/`; the best-ranked one with no open DRC item is kept (D-019). If none is clean it escalates, cheapest first: checks the other routed orders, then routes `extra_rounds` × `extra_tries` new orders (default 1 × 8) and checks them. If still none is clean it keeps the one with the fewest open items and writes the failure report (D-020) | same file; the winner's work files in `kicad/route/`, each order's in `route/try-<n>/`, scores and steps in `route/tries.json`; on failure `route/failure.json` and a line per failed order in `<board>/route-failures.jsonl` |
-| check | netlist round trip, net-class patterns, ERC, DRC (JLCPCB rules, schematic parity), routing report; fails on any error, unwaived warning, unrouted connection or copper in a keep-out | `kicad/reports/{erc,drc,routing}.json` |
+| check | netlist round trip, net-class patterns, BOARD.TOML, ERC, DRC (JLCPCB rules, schematic parity), routing report; fails on any error, unwaived warning, unrouted connection or copper in a keep-out | `kicad/reports/{erc,drc,routing,gates}.json` |
 | fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections (bottom side: 180 − angle, as kicad-jlcpcb-tools); lists parts whose rotation is UNVERIFIED, and every bottom-side part | `fab/` (see `fab/README.md`) |
+| fw | the BOARD.TOML gate, then the ESP-IDF pin header from `board.toml` (a board without one is skipped) | `firmware/board_pins.h` |
+| cost | prices the BOM line by line from JLCPCB's parts API (live; minimums, attrition, Extended fees), plus PCB, setup, stencil and joints, for `[order]` (default 5 bare, 2 assembled); shipping and VAT apart, since they are per parcel (D-021, D-023) | `fab/cost.json` |
+| review | the owner's review page from what the other stages wrote: renders, round and changes since the last draft tag, things to check, requirement coverage, cost against budget, power, checks (D-023) | `review/index.html` (gitignored) |
 
 `scripts/render.sh boards/<name> [out.png] [layers]` renders the top side to look at (`B.Cu,B.Fab,B.Courtyard,B.SilkS,Edge.Cuts` for the back).
+`scripts/draft.sh <board>`, `scripts/freeze.sh <board>` and `scripts/check-frozen.sh <board>` tag design rounds, freeze a revision, and check before an order that nothing changed since the freeze (D-023, `docs/workflow.md`).
 `scripts/fr-violations/run.sh <board.dsn>` lists the clearance violations Freerouting counts, with the items involved (D-018).
 
 ## When routing fails (D-020)
@@ -36,11 +40,11 @@ With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and
 - **Prevention rules so far:** `RouteOptions::pad_rings` (`PadRing::new("J1", "SH")`) keeps tracks and vias off a poured pad's thermal spokes (`starved_thermal`).
 
 ## Tests
-- `cargo test --release`: unit tests that need no KiCad (DSN writer conventions and pad shapes, SES reader, stitching grid, router log and score, the escalation ladder, the failure report and log, net-class globs, geometry).
+- `cargo test --release`: unit tests that need no kicad-cli (DSN writer conventions and pad shapes, SES reader, stitching grid, router log and score, the escalation ladder, the failure report and log, net-class globs, geometry, `board.toml` parsing and every gate error, the pin header, cost arithmetic from a canned API answer, the review page's helpers). The `board.toml` tests load KiCad's installed symbol libraries.
 - `cargo test --release -p starter -- --ignored`: the whole pipeline on the starter board into a temp directory, checking the reports (needs kicad-cli and Freerouting; a few minutes).
 
 ## Code layout
-- `crates/pcbgen`: the library. `circuit` (model), `symlib` (`.kicad_sym`), `schematic`, `project` (`.kicad_pro`, `.kicad_dru`), `footprint` (`.kicad_mod` loading and placing), `pcb` (board writer), `board` (typed view of a saved `.kicad_pcb`), `geom`, `dsn`, `ses`, `route`, `failure`, `stitch`, `gates`, `report`, `fab`, `layout` (the types a board's layout uses), `cli`.
+- `crates/pcbgen`: the library. `circuit` (model), `symlib` (`.kicad_sym`), `schematic`, `project` (`.kicad_pro`, `.kicad_dru`), `footprint` (`.kicad_mod` loading and placing), `pcb` (board writer), `board` (typed view of a saved `.kicad_pcb`), `geom`, `dsn`, `ses`, `route`, `failure`, `stitch`, `gates`, `report`, `fab`, `boardfile` (`board.toml`, its gate and the pin header), `cost`, `review`, `layout` (the types a board's layout uses), `cli`.
 - `boards/<name>`: one binary crate per board (a member of the workspace).
 
 ## A board directory (a crate)
@@ -57,7 +61,8 @@ With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and
   - `spec`: board size, `places` (every reference: `at(x, y)`, `at_rot(x, y, deg)` or `at_bottom(x, y, deg)` for the back side, mm from the top-left with Y down; a bottom part's angle is the one KiCad shows, D-018), silk `Text` labels, and `CopperZone`s (local pours of one net, e.g. regulator cooling copper; filled above GND).
   - `route`: Freerouting and stitching options (`RouteOptions`: `tries`, `parallel`, `fanout`, `drc_checks`, `extra_rounds`, `extra_tries`, `pad_rings`, stitching).
   - `waivers`: `Waiver { kind, substring, reason }` entries.
-- Generated: `kicad/` and `fab/`.
+- `board.toml`, `spec.md` (from `templates/`): pin map, power budget, requirements; see `docs/workflow.md` step 2. `round.md`: Claude's notes for the current design round, shown on the review page. `errata-rev<X>.md` after bring-up.
+- Generated: `kicad/`, `fab/` and `firmware/board_pins.h` (committed); `review/` (not committed). Firmware source goes in `firmware/` too, once written.
 - Modified footprints go in `lib/footprints/<Lib>.pretty` (repo root); the `sch` stage points the project's fp-lib-table there for any library of that name. Currently `pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3` (D-015).
 
 ## Status (2026-09-29, starter board)
