@@ -24,6 +24,10 @@ Research behind these: `research/2026-09-29-landscape.md`.
   - **Provisioning:** a generic `devctl provision` reading `board.toml [provision]` references, instead of the `capture-notes` subcommand D-024 mentioned.
   - **OTA:** USB only for Rev A; two slots and rollback kept so a network update needs no partition change.
   - **Circuit consequences for capture-clip:** mic powered straight from a GPIO (no P-FET), battery divider 3:1, a VBUS-sense divider, a 10 kΩ pull-up on GPIO0, CHRG through ~100 kΩ, brown-out 2.84 V, no upload below 3.45 V and no recording below 3.3 V, and a hold with no last note makes a new note.
+- **Built in Phase A so far (Claude's choices):**
+  - The `fw` stage writes the Wokwi files (`diagram.json`, `wokwi.toml`, `wokwi-selftest.yaml`) from `board.toml` whenever a pin has a `sim` part, and they are committed like `board_pins.h`. Why: they are derived facts, so they are regenerated every run and can't drift; `sim --wokwi` only builds and runs.
+  - `sim --wokwi` runs `wokwi-cli lint` first (free, catches wrong pins before any quota is spent) and logs every run's simulated seconds in `~/.config/wokwi/usage.jsonl`, printing the month's total against the 3000 s allowance. `SELFTEST_DONE` now carries the uptime (`ms`), which is the billed time of a finished run.
+  - A run without `--wokwi` keeps the last Wokwi result in `sim.json`, since redoing it costs quota.
 - **Not verified yet:** assembled boards and 3D prints in one JLC parcel (ask JLC before the first order); the Espressif codec on v6.1; HTTPS from Wokwi to Gemini and GitHub.
 
 ## D-024 First project: capture-clip, a battery voice-note button for Capture (DECIDED, brainstorm closed by the owner, 2026-09-29)

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "board.h"
+#include "esp_timer.h"
 
 // Detail text goes inside a JSON string: keep it printable and unquoted.
 static void clean(char *s)
@@ -36,8 +37,9 @@ int selftest_run(const char *const wanted[], size_t n_wanted, const selftest_cas
         count[r]++;
         printf("SELFTEST {\"test\":\"%s\",\"result\":\"%s\",\"detail\":\"%s\"}\n", c->name, words[r], detail);
     }
-    printf("SELFTEST_DONE {\"pass\":%d,\"fail\":%d,\"skip\":%d,\"missing\":%d}\n",
-           count[SELFTEST_PASS], count[SELFTEST_FAIL], count[SELFTEST_SKIP], missing);
+    // ms: uptime, so a simulator run can tell how much simulated time it used
+    printf("SELFTEST_DONE {\"pass\":%d,\"fail\":%d,\"skip\":%d,\"missing\":%d,\"ms\":%lld}\n",
+           count[SELFTEST_PASS], count[SELFTEST_FAIL], count[SELFTEST_SKIP], missing, esp_timer_get_time() / 1000);
     int bad = count[SELFTEST_FAIL] + missing;
     if (bad == 0) {
         board_mark_good();

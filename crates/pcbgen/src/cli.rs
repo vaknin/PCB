@@ -1,5 +1,5 @@
 //! Pipeline driver, called by each board's `main`:
-//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [cost] [review] [--out DIR] [--tries N]`
+//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [cost] [review] [--out DIR] [--tries N] [--wokwi]`
 //!
 //! Stages run in this order whatever order they are named in (default: all). Generated
 //! KiCad files go to `<board>/kicad/` and fab files to `<board>/fab/`; `--out DIR` puts
@@ -7,8 +7,10 @@
 //! number of Freerouting footprint orders (`--tries 1` for a quick look at a placement).
 //!
 //! A board with a `board.toml` (D-023) gets the BOARD.TOML gate in `sch`, `check` and `fw`;
-//! `fw` writes the firmware's pin header to `<board>/firmware/board_pins.h`.
-//! `cost` (live JLCPCB prices, needs the network) and `review` (the owner's review page,
+//! `fw` writes the firmware's pin header to `<board>/firmware/board_pins.h`, and the Wokwi
+//! files (`diagram.json`, `wokwi.toml`, the scenario) when a pin has a `sim` part.
+//! `sim` (the firmware in QEMU, plus Wokwi with `--wokwi`; D-025), `cost` (live JLCPCB
+//! prices, needs the network) and `review` (the owner's review page,
 //! `<board>/review/index.html`) run only when named.
 
 use std::path::{Path, PathBuf};
@@ -19,7 +21,7 @@ use anyhow::{Result, bail};
 use crate::circuit::Circuit;
 use crate::layout::Layout;
 use crate::sexpr::Sexp;
-use crate::{boardfile, cost, fab, gates, pcb, project, report, review, route, schematic, sim};
+use crate::{boardfile, cost, fab, gates, pcb, project, report, review, route, schematic, sim, wokwi};
 
 pub const STAGES: [&str; 9] = ["sch", "pcb", "route", "check", "fab", "fw", "sim", "cost", "review"];
 /// What runs when no stage is named: everything that builds and checks the design.
@@ -156,6 +158,12 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
                 let path = dir.join("board_pins.h");
                 std::fs::write(&path, boardfile::header(bf))?;
                 println!("fw: {}", path.display());
+                if wokwi::wanted(bf) {
+                    std::fs::write(dir.join(wokwi::DIAGRAM), wokwi::diagram(bf))?;
+                    std::fs::write(dir.join(wokwi::TOML), wokwi::toml())?;
+                    std::fs::write(dir.join(wokwi::SCENARIO), wokwi::scenario(bf))?;
+                    println!("fw: {} (+ {}, {})", dir.join(wokwi::DIAGRAM).display(), wokwi::TOML, wokwi::SCENARIO);
+                }
             }
         }
     }

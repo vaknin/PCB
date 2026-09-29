@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "author": "pcbgen, from board.toml (do not edit; the fw stage rewrites it)",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {
+        "flashSize": "16",
+        "psramSize": "8",
+        "psramType": "octal",
+        "serialInterface": "USB_SERIAL_JTAG",
+        "cpuFrequency": "240"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "status_led_r",
+      "top": 0,
+      "left": 260,
+      "attrs": {
+        "value": "1000"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "status_led",
+      "top": 80,
+      "left": 260,
+      "attrs": {
+        "color": "red",
+        "label": "STATUS_LED"
+      }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "boot",
+      "top": 160,
+      "left": 260,
+      "attrs": {
+        "label": "BOOT",
+        "bounce": "0"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "boot_pullup",
+      "top": 240,
+      "left": 260,
+      "attrs": {
+        "value": "10000"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "esp:48",
+      "status_led_r:1",
+      "green",
+      []
+    ],
+    [
+      "status_led_r:2",
+      "status_led:A",
+      "green",
+      []
+    ],
+    [
+      "status_led:C",
+      "esp:GND.1",
+      "green",
+      []
+    ],
+    [
+      "esp:0",
+      "boot:1.l",
+      "green",
+      []
+    ],
+    [
+      "boot:2.l",
+      "esp:GND.1",
+      "green",
+      []
+    ],
+    [
+      "esp:0",
+      "boot_pullup:1",
+      "green",
+      []
+    ],
+    [
+      "boot_pullup:2",
+      "esp:3V3.1",
+      "green",
+      []
+    ]
+  ],
+  "dependencies": {}
+}

@@ -25,6 +25,7 @@ pub mod sexpr;
 pub mod sim;
 pub mod stitch;
 pub mod symlib;
+pub mod wokwi;
 
 use std::path::PathBuf;
 use std::process::Command;

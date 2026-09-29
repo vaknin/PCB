@@ -46,8 +46,8 @@ static uint8_t crc8(const uint8_t *d, int n)
 
 static selftest_result_t sht40(char *detail, size_t len)
 {
-    if (BOARD_IS_QEMU) {
-        snprintf(detail, len, "no I2C in QEMU");
+    if (!BOARD_IS_REAL) { // QEMU has no I2C; Wokwi has no SHT40
+        snprintf(detail, len, "no SHT40 in the %s simulation", BOARD_TARGET);
         return SELFTEST_SKIP;
     }
     if (i2c_up() != ESP_OK) {
@@ -84,8 +84,8 @@ static selftest_result_t sht40(char *detail, size_t len)
 
 static selftest_result_t i2c_scan(char *detail, size_t len)
 {
-    if (BOARD_IS_QEMU) {
-        snprintf(detail, len, "no I2C in QEMU");
+    if (!BOARD_IS_REAL) { // QEMU has no I2C; Wokwi has no SHT40
+        snprintf(detail, len, "no SHT40 in the %s simulation", BOARD_TARGET);
         return SELFTEST_SKIP;
     }
     if (i2c_up() != ESP_OK) {
@@ -122,7 +122,8 @@ static selftest_result_t status_led(char *detail, size_t len)
     return SELFTEST_PASS;
 }
 
-// Waits up to 10 s for a press of BOOT (a Wokwi scenario presses it).
+// Waits up to 10 s for a press of BOOT and its release (a Wokwi scenario presses it). It
+// reports only after the release, so a scenario's next wait can't miss the report.
 static selftest_result_t boot_button(char *detail, size_t len)
 {
     if (BOARD_IS_QEMU) {
@@ -132,14 +133,18 @@ static selftest_result_t boot_button(char *detail, size_t len)
     gpio_reset_pin(PIN_BOOT);
     gpio_set_direction(PIN_BOOT, GPIO_MODE_INPUT); // R5 pulls it up
     printf("SELFTEST_PRESS boot_button\n");
+    int down = -1;
     for (int i = 0; i < 1000; i++) {
-        if (gpio_get_level(PIN_BOOT) == 0) { // active low
-            snprintf(detail, len, "pressed after %d ms", i * 10);
+        bool pressed = gpio_get_level(PIN_BOOT) == 0; // active low
+        if (pressed && down < 0) {
+            down = i;
+        } else if (!pressed && down >= 0) {
+            snprintf(detail, len, "pressed for %d ms", (i - down) * 10);
             return SELFTEST_PASS;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    snprintf(detail, len, "no press in 10 s");
+    snprintf(detail, len, down < 0 ? "no press in 10 s" : "held, never released");
     return SELFTEST_FAIL;
 }
 

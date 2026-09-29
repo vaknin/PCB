@@ -2,7 +2,7 @@
 // ([firmware] self_test, BOARD_SELF_TESTS in board_pins.h) at bring-up and in simulation,
 // and reports them as JSON lines that devctl and the pcbgen sim stage parse:
 //   SELFTEST {"test":"sht40","result":"pass","detail":"23.1 C, 41 %RH"}
-//   SELFTEST_DONE {"pass":3,"fail":0,"skip":1,"missing":0}
+//   SELFTEST_DONE {"pass":3,"fail":0,"skip":1,"missing":0,"ms":2140}   (ms = uptime)
 #pragma once
 
 #include <stddef.h>

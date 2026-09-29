@@ -6,10 +6,16 @@
 //!   self-tests `board.toml` lists and a provisioning round trip. QEMU has no GPIO, I2C, I2S, USB,
 //!   Wi-Fi or deep sleep, so tests that need them report "skip" there.
 //! - **Wokwi** (`sim --wokwi`, free plan 50 simulated minutes a month): the pin checks QEMU
-//!   can't do. Not built yet.
+//!   can't do. Builds the Wokwi target (`firmware/build-wokwi`) and runs the files the `fw`
+//!   stage generated (`crate::wokwi`) with `wokwi-cli`, a tight timeout and the token from
+//!   `~/.config/wokwi/token` (passed in the environment, never printed). Only board-side
+//!   parts go in: no real secret ever enters a Wokwi run (its network gateway is public).
+//!   Every run is logged with its simulated seconds in `~/.config/wokwi/usage.jsonl`, so
+//!   the month's quota use is known.
 //!
-//! Results go to `firmware/sim.json` for the review page; the serial log to
-//! `firmware/build-qemu/sim.log`. ESP-IDF is found at `$IDF_PATH` or `~/esp/esp-idf-v6.1`.
+//! Results go to `firmware/sim.json` for the review page (a run without `--wokwi` keeps the
+//! last Wokwi result); the serial logs to `firmware/build-{qemu,wokwi}/sim.log`. ESP-IDF is
+//! found at `$IDF_PATH` or `~/esp/esp-idf-v6.1`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -18,15 +24,22 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::boardfile::BoardFile;
+use crate::wokwi;
 
 /// ESP32-S3-WROOM-1-N16R8 (the only module pcbgen has a GPIO table for).
 const FLASH: &str = "16MB";
 const PSRAM_BYTES: u64 = 8 << 20;
 /// How long the whole QEMU run may take (wall clock); a boot takes a few seconds.
 const QEMU_TIMEOUT: Duration = Duration::from_secs(90);
+/// Simulated time a Wokwi run may take. A run that times out is billed all of it, so keep it
+/// tight: the starter's self-test ends about 3 s after boot.
+const WOKWI_TIMEOUT_MS: u64 = 15_000;
+/// The free plan's monthly allowance, simulated seconds.
+const WOKWI_MONTH_SECONDS: f64 = 50.0 * 60.0;
 
 /// The otadata entry "ota_0, state VALID" (sequence 1, CRC as the bootloader writes it), copied
 /// from an image the firmware itself had marked. A blank otadata makes the app write this entry
@@ -56,8 +69,15 @@ pub fn run(bf: &BoardFile, fw: &Path, out: &Path, opts: &Options) -> Result<bool
     print_summary("QEMU", &qemu);
 
     let old: Value = std::fs::read_to_string(out.join("sim.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let mut wokwi_ok = true;
     let wokwi = if opts.wokwi {
-        bail!("sim --wokwi is not built yet (D-025 Phase A)");
+        let r = match wokwi_run(bf, fw, &idf) {
+            Ok(v) => v,
+            Err(e) => json!({"ok": false, "problems": [format!("{e:#}")]}),
+        };
+        wokwi_ok = r["ok"] == true;
+        print_summary("Wokwi", &r);
+        r
     } else {
         old["wokwi"].clone() // keep the last Wokwi result; it costs quota to redo
     };
@@ -70,7 +90,7 @@ pub fn run(bf: &BoardFile, fw: &Path, out: &Path, opts: &Options) -> Result<bool
     std::fs::create_dir_all(out)?;
     std::fs::write(out.join("sim.json"), serde_json::to_string_pretty(&result)? + "\n")?;
     println!("sim: {}", out.join("sim.json").display());
-    Ok(qemu_ok)
+    Ok(qemu_ok && wokwi_ok)
 }
 
 fn print_summary(what: &str, r: &Value) {
@@ -248,33 +268,41 @@ fn qemu_run(bf: &BoardFile, fw: &Path, idf: &Path) -> Result<Value> {
     Ok(r)
 }
 
-/// What the QEMU run checks. Every problem is collected; `ok` is true only with none.
-fn qemu_script(bf: &BoardFile, con: &mut Console) -> Result<Value> {
+/// The boot banner and self-test report in a console log, checked against `board.toml`:
+/// `(banner, tests, summary, problems)`. Tests may pass or skip; a failing or missing one, or
+/// a banner that doesn't match the board and target, is a problem.
+fn report(bf: &BoardFile, log: &[String], target: &str) -> (Value, Vec<Value>, Value, Vec<String>) {
     let mut problems: Vec<String> = vec![];
-    let banner: Value = serde_json::from_str(&con.expect("BOARD ")?).context("BOARD banner is not JSON")?;
+    let after = |prefix: &str| log.iter().find_map(|l| l.strip_prefix(prefix)).map(str::trim);
+    let banner: Value = match after("BOARD ").map(serde_json::from_str) {
+        Some(Ok(v)) => v,
+        Some(Err(_)) => {
+            problems.push("BOARD banner is not JSON".into());
+            Value::Null
+        }
+        None => {
+            problems.push("no BOARD banner".into());
+            Value::Null
+        }
+    };
     let want = [
         ("name", json!(bf.board.name)),
         ("rev", json!(bf.board.revision)),
-        ("target", json!("qemu")),
+        ("target", json!(target)),
         ("psram", json!(PSRAM_BYTES)),
         ("nvs", json!(true)),
     ];
     for (k, v) in want {
-        if banner[k] != v {
+        if !banner.is_null() && banner[k] != v {
             problems.push(format!("banner {k} is {}, expected {v}", banner[k]));
         }
     }
 
-    let mut tests: Vec<Value> = vec![];
-    let done: Value = loop {
-        let l = con.expect("SELFTEST")?;
-        if let Some(rest) = l.strip_prefix("_DONE") {
-            break serde_json::from_str(rest.trim()).context("SELFTEST_DONE is not JSON")?;
-        }
-        if let Ok(t) = serde_json::from_str::<Value>(&l) {
-            tests.push(t);
-        }
-    };
+    let tests: Vec<Value> = log
+        .iter()
+        .filter_map(|l| l.strip_prefix("SELFTEST "))
+        .filter_map(|t| serde_json::from_str(t.trim()).ok())
+        .collect();
     for name in &bf.firmware.self_test {
         match tests.iter().find(|t| t["test"] == name.as_str()) {
             None => problems.push(format!("self-test {name} never reported")),
@@ -284,9 +312,23 @@ fn qemu_script(bf: &BoardFile, con: &mut Console) -> Result<Value> {
             Some(_) => {}
         }
     }
-    if done["fail"] != 0 || done["missing"] != 0 {
+    let done: Value = match after("SELFTEST_DONE").map(serde_json::from_str) {
+        Some(Ok(v)) => v,
+        _ => {
+            problems.push("no SELFTEST_DONE summary".into());
+            Value::Null
+        }
+    };
+    if !done.is_null() && (done["fail"] != 0 || done["missing"] != 0) {
         problems.push(format!("self-test summary: {done}"));
     }
+    (banner, tests, done, problems)
+}
+
+/// What the QEMU run checks. Every problem is collected; `ok` is true only with none.
+fn qemu_script(bf: &BoardFile, con: &mut Console) -> Result<Value> {
+    con.expect("SELFTEST_DONE")?;
+    let (banner, tests, done, mut problems) = report(bf, &con.log, "qemu");
 
     // provisioning: set, list, delete a throwaway key; the value must never come back
     con.expect("PROV READY")?;
@@ -318,4 +360,112 @@ fn qemu_script(bf: &BoardFile, con: &mut Console) -> Result<Value> {
         "provision": provision,
         "problems": problems,
     }))
+}
+
+fn home() -> Result<PathBuf> {
+    Ok(PathBuf::from(std::env::var("HOME")?))
+}
+
+/// `wokwi-cli` from PATH, or where its installer puts it.
+fn wokwi_cli() -> Result<PathBuf> {
+    let on_path = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .map(|d| d.join("wokwi-cli"))
+        .find(|p| p.exists());
+    let local = home()?.join(".local/bin/wokwi-cli");
+    on_path.or(local.exists().then_some(local)).context("wokwi-cli not installed (https://docs.wokwi.com/wokwi-ci/cli-installation)")
+}
+
+fn wokwi_run(bf: &BoardFile, fw: &Path, idf: &Path) -> Result<Value> {
+    for f in [wokwi::DIAGRAM, wokwi::TOML, wokwi::SCENARIO] {
+        if !fw.join(f).exists() {
+            bail!("no {f} in {}: run the fw stage (it writes the Wokwi files when a board.toml pin has a sim part)", fw.display());
+        }
+    }
+    let cli = wokwi_cli()?;
+    let token_file = home()?.join(".config/wokwi/token");
+    let token = std::fs::read_to_string(&token_file).with_context(|| format!("no Wokwi token at {}", token_file.display()))?;
+    // lint is local and free: a bad diagram fails here, before any quota is spent
+    let lint = Command::new(&cli).args(["lint", "-q"]).arg(fw).output().context("running wokwi-cli lint")?;
+    let lint_text = format!("{}{}", String::from_utf8_lossy(&lint.stdout), String::from_utf8_lossy(&lint.stderr));
+    if !lint.status.success() {
+        bail!("wokwi-cli lint rejected {}:\n{}", fw.join(wokwi::DIAGRAM).display(), lint_text.trim());
+    }
+
+    let build = build(fw, idf, "wokwi")?;
+    let serial = build.join("sim.log");
+    let _ = std::fs::remove_file(&serial);
+    let started = Instant::now();
+    // `timeout` bounds the wall clock too, in case the Wokwi service never answers
+    let out = Command::new("timeout")
+        .arg("300")
+        .arg(&cli)
+        .arg(fw)
+        .args(["--timeout", &WOKWI_TIMEOUT_MS.to_string(), "--scenario"])
+        .arg(fw.join(wokwi::SCENARIO))
+        .arg("--serial-log-file")
+        .arg(&serial)
+        .env("WOKWI_CLI_TOKEN", token.trim())
+        .stdin(Stdio::null())
+        .output()
+        .context("running wokwi-cli")?;
+    let wall = started.elapsed().as_secs_f64();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    std::fs::write(build.join("wokwi-cli.log"), &text)?;
+    let code = out.status.code().unwrap_or(-1);
+
+    let log: Vec<String> = std::fs::read_to_string(&serial).unwrap_or_default().lines().map(|l| l.trim_end_matches('\r').to_string()).collect();
+    let (banner, tests, done, mut problems) = report(bf, &log, "wokwi");
+    let timed_out = code == 42;
+    match code {
+        0 => {}
+        42 => problems.insert(0, format!("the scenario didn't finish within {} s of simulated time", WOKWI_TIMEOUT_MS / 1000)),
+        124 => problems.insert(0, "wokwi-cli ran 300 s of wall time without finishing".into()),
+        _ => {
+            // a failed scenario step throws `Error: [<ns>] <why>`; otherwise show the last line
+            let plain = Regex::new(r"\x1b\[[0-9;]*m").unwrap().replace_all(&text, "").into_owned();
+            let why = plain.lines().find(|l| l.starts_with("Error")).or(plain.lines().rfind(|l| !l.trim().is_empty())).unwrap_or("");
+            problems.insert(0, format!("wokwi-cli exit {code}: {} (log: {})", why.trim(), build.join("wokwi-cli.log").display()));
+        }
+    }
+    // Billed simulated time: the whole timeout if it ran out, else about the uptime at
+    // SELFTEST_DONE (the firmware prints it; the boot ROM's fraction of a second is not in it).
+    let sim_seconds = if timed_out {
+        (WOKWI_TIMEOUT_MS / 1000) as f64
+    } else {
+        done["ms"].as_f64().map_or(wall.min((WOKWI_TIMEOUT_MS / 1000) as f64), |ms| ms / 1000.0)
+    };
+    let month_total = wokwi_ledger(&bf.board.name, sim_seconds, problems.is_empty())?;
+    println!(
+        "   Wokwi quota: ~{sim_seconds:.1} s this run; ~{:.0} of {:.0} s used this month (~/.config/wokwi/usage.jsonl)",
+        month_total, WOKWI_MONTH_SECONDS
+    );
+    Ok(json!({
+        "ok": problems.is_empty(),
+        "date": crate::schematic::today(),
+        "banner": banner,
+        "tests": tests,
+        "summary": done,
+        "sim_seconds": (sim_seconds * 10.0).round() / 10.0,
+        "wall_seconds": wall.round(),
+        "problems": problems,
+    }))
+}
+
+/// Appends this run to the local Wokwi usage log and returns the month's simulated seconds.
+fn wokwi_ledger(board: &str, sim_seconds: f64, ok: bool) -> Result<f64> {
+    let path = home()?.join(".config/wokwi/usage.jsonl");
+    let today = crate::schematic::today();
+    let line = json!({"date": today, "board": board, "sim_seconds": sim_seconds, "ok": ok}).to_string();
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    writeln!(f, "{line}")?;
+    let month = &today[..7];
+    let total = std::fs::read_to_string(&path)?
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["date"].as_str().is_some_and(|d| d.starts_with(month)))
+        .filter_map(|v| v["sim_seconds"].as_f64())
+        .sum();
+    Ok(total)
 }

@@ -29,6 +29,7 @@ net = "STATUS"
 gpio = 48
 dir = "out"
 note = "red LED D2 through 1k (R6); high = on"
+sim = "led"
 
 [[pin]]
 signal = "BOOT"
@@ -38,6 +39,7 @@ gpio = 0
 dir = "in"
 active_low = true
 note = "BOOT button SW2, 10k pull-up (R5); strapping pin: held low at reset = download mode"
+sim = "button"
 
 [[pin]]
 signal = "UART_TX"
@@ -154,3 +156,14 @@ covered_by = ["gate:erc", "gate:drc", "gate:netlist", "gate:routing"]
 
 [firmware]
 self_test = ["sht40", "i2c_scan", "status_led", "boot_button"]
+
+# Wokwi (sim --wokwi, D-025): the LED must be on while the firmware says so, and the button
+# test gets a press. The SHT40 tests skip there (Wokwi has no SHT40).
+[[sim.wokwi_step]]
+wait = "SELFTEST_LOOK status_led on"
+expect = "STATUS_LED"
+level = 1
+
+[[sim.wokwi_step]]
+wait = "SELFTEST_PRESS boot_button"
+press = "BOOT"
