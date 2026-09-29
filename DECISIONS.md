@@ -3,13 +3,47 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-018 pcbgen: bottom-side parts; Freerouting's "violations" explained (DECIDED, technical, 2026-09-29)
+- **Bottom-side parts work end to end.** In a layout, `at_bottom(x, y, rot)` places a part on the back. `rot` is the angle KiCad shows for the flipped part, still CCW as seen from the top. It means: flip the footprint left-right at angle 0 (pcbnew's flip), then turn it to `rot`.
+- **Board file:** `footprint::flip` rewrites the library footprint the way pcbnew saves a flipped one:
+  - Y negated in the footprint's frame; F.* ↔ B.* layers
+  - pad angles negated, trapezoid dy negated, chamfer corners swapped
+  - KiCad's rule for text angles, justification and mirroring (rules in `HARDWARE_LESSONS.md`)
+  - The part is then placed as before.
+  - **Checked:** 23 footprints, 11 of them different library parts plus two synthetic test footprints covering every item type and text case, were placed by pcbgen and compared item by item with a board pcbnew saved after `Flip`. All match, except KiCad re-saving a 30°-turned rectangle as a polygon with its own point order (same corners).
+  - Hidden symbol fields on a bottom part go on B.SilkS, turned 180° and mirrored. That is inferred from the flip rule, not checked against pcbnew's netlist update.
+- **DSN:** a bottom part is written as KiCad's exporter writes it: the image of the top-side footprint it came from, placed `back` at its angle + 180, so top and bottom copies share an image.
+  - **Checked against `pcbnew.ExportSpecctraDSN`** on the same 23 parts: placements, pin positions, rotations and shapes, and keep-outs all match.
+  - Duplicate-numbered pins (`SH@1`…) get their `@n` suffixes in a different order on back parts: same shapes, internal names only.
+  - **Checked in Freerouting too:** its own reader puts every pin of the bottom parts where the board file has them, on the back layer, and the SHT40's keep-out on the back.
+- **Rest of the pipeline:**
+  - Escape stubs go on the part's own copper side, against keep-outs on that side.
+  - The routing report counts a track in a keep-out only on the keep-out's layers (a via on any layer), and names the footprint.
+  - Stitching already avoided courtyards and pads on both sides.
+  - **CPL:** bottom rotation = 180 − KiCad's angle + the package correction, position as seen from the top. That is kicad-jlcpcb-tools' rule (its `fabrication.py`), not JLCPCB's own documentation. Every bottom part is listed UNVERIFIED in `fab/README.md` for the placement-preview check.
+  - Owner note for later: bottom-side assembly at JLCPCB costs extra (a second side). Nothing uses it yet.
+- **Found on the way:** pads whose copper is offset from their hole (`(drill ... (offset x y))`) were written into the DSN centred on the hole. They are now shifted, and named `Oval[A][dx,dy]Pad_...` as KiCad names them. `Pad::dist` (stitching) uses the offset too. No starter part has one.
+- **Also:** image keep-outs are rounded to 1 nm in the footprint's frame, so a rotated part's image carries no sub-nm noise.
+- **Scratch test:** a copy of the starter board with R5 and the SHT40 (U4) moved to the back, full pipeline into a scratch directory.
+  - Passed: ERC 0, schematic parity 0, 0 unrouted, no copper in keep-outs, 11 waived silk warnings as on the starter, CPL as expected. The render shows both parts on the back with mirrored fab text, the keep-out and escape stubs in place.
+  - DRC failed on one item: 2 `starved_thermal` errors on the USB-C shield pads. The kept route ran a track through their ground-pour spokes. That is a routing outcome near J1, not a bottom-side placement fault, and the gate caught it.
+  - The route stage's score doesn't look at DRC; a board that hits this would need a placement tweak or a DRC-aware pick of the order (not done).
+- **Unchanged starter:** a full scratch run gave a byte-identical schematic, BOM, CPL, positions, every DSN body and the session file, and an identical routing report. The committed board is not re-routed. `fab/README.md` changes only in a heading ("…, or bottom side").
+- **Freerouting's ~20 "clearance violations" (open since D-017): explained, harmless.** `scripts/fr-violations/run.sh <dsn>` loads the DSN with Freerouting's own reader (`DsnReader.readBoard`) and prints `Item.clearanceViolations()` with both items and their places. On the starter's DSN they are:
+  - 12: the ESP32 EPAD's thermal holes overlapping the pad, same net
+  - 4: the HRO USB-C footprint's stacked pad pairs, same net, same place
+  - 4: the locked SHT40 escape stubs inside the sensor's keep-out notch (D-010)
+  - They are all by design: present before routing, and never changed by it. KiCad's DRC rightly sees none. Nothing in the DSN is wrong.
+  - The probe runs on Freerouting's Java 25 runtime through a copy of its launcher, because javac 21 can't read Java 25 class files; hence the reflection.
+- **Tests:** 25 unit tests (new: `flip` against pcbnew's saved values, a bottom part read back through `board::Footprint`, the DSN of a top and a bottom copy, drill-offset padstacks, CPL rotations).
+
 ## D-017 pcbgen: best-of-N routing with fanout off, pad shapes, tests (DECIDED, technical, 2026-09-29)
 - **Thin tracks had one cause: Freerouting's fanout stage.** Its code (read from the 2.4.1 jar with `javap`, `FoundConnectionInserter.insertFanoutMicroNeckdown`) narrows a fanout track to 3/4 or 3/5 of its class width: that is where the 0.225 mm (of 0.3) and 0.15 mm (of 0.2) tracks came from. Its `automatic_neckdown` setting changed nothing (identical session file). With fanout off, all 8 footprint orders of the starter board routed with **no** track under its class width (40–49 mm with fanout on) and 19–27 vias instead of 23–31. `RouteOptions::fanout` is now `false` by default.
 - **Best of N orders, not first success.** The route stage routes 8 footprint orders (`RouteOptions::tries`), 4 at a time (`parallel`), and keeps the best: fewest unrouted connections on other nets, then on the pour net, then least track under its class width (0.1 mm steps), then fewest vias, then shortest (0.1 mm steps); ties go to the lower order. Each order works in `kicad/route/try-<n>/`; the winner's `board.dsn`/`.ses`/log are copied to `kicad/route/`, and every order's score goes to `route/tries.json` and into `reports/routing.json` as `router`. Order 0 is the board's own footprint order; the others are seeded shuffles, so a run is reproducible.
 - **Cost: time.** Freerouting takes ~21 s alone on this laptop (Ryzen 7 5700U, 8 cores); 4 at once take ~54 s each (memory-bound: its thread settings and JVM GC options changed nothing, and results are identical whatever the thread count). A full starter run is now ~2.5 min (was ~35 s). `--tries 1` on the command line gives a quick single route while iterating on placement.
 - **Starter result:** order 2 of 8 kept: 0 unrouted, 20 routed vias (was 30), 1.6 mm under class width (only the locked 0.2 mm escape stubs on +3V3/GND; was 45.9 mm). All gates pass. The GND pour on top is now in 3 pieces, 50% of its outline (was 2 pieces, 61%), because more track runs on top; every piece is stitched and DRC shows 0 unconnected. The design (parts, nets, placement, rules) is unchanged; BOM and CPL byte-identical.
 - **Via cost flag fixed:** Freerouting 2.4.1's setting is `router.scoring.viaCosts` (field names read from its settings classes); `router.via_costs` was ignored. Same value (50) as before.
-- **Freerouting reports ~20 "clearance violations" on every starter route** that KiCad's DRC doesn't see. 4 come from the locked SHT40 escape stubs; the rest are probably overlaps its own model counts (e.g. keep-outs over pads). KiCad's DRC is the gate; the count is kept in `tries.json` for comparison (UNVERIFIED cause).
+- **Freerouting reports ~20 "clearance violations" on every starter route** that KiCad's DRC doesn't see. 4 come from the locked SHT40 escape stubs; the rest are probably overlaps its own model counts (e.g. keep-outs over pads). KiCad's DRC is the gate; the count is kept in `tries.json` for comparison. (Cause found in D-018: all by design.)
 - **Pads:** trapezoid pads (KiCad's `rect_delta` corners) and custom pads (convex hull of anchor and primitives, strokes included) now go into the DSN as polygons; stitching's pad distance uses the same outline. Freerouting itself takes a padstack polygon's convex hull (read from its `Library` parser), so the hull loses nothing. Unnumbered pads are named `@1`, `@2`, ... as KiCad does; the first one used to be written with an empty name, which broke the DSN. Checked against KiCad 10's own DSN export (pcbnew's `ExportSpecctraDSN`, still installed with KiCad 10; used only as a reference) on 11 library footprints: all 104 pin shapes present, KiCad's copper at most 0.4 µm outside ours, ours at most 10 µm larger. Chamfered roundrects stay rounded (covers more copper; conservative). Bottom-side parts are still refused.
 - **Netlist exported once per run** (the netlist and net-class gates and the pcb stage each used to export it).
 - **Tests:** 21 unit tests without KiCad (DSN naming, quoting, shapes and conventions; SES reading; stitch grid origin; log parsing and score order; glob; pad distances; convex hull) and one opt-in end-to-end test (`cargo test --release -p starter -- --ignored`, needs kicad-cli and Freerouting).

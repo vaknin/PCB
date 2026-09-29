@@ -20,9 +20,10 @@ With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and
 | pcb | exports the netlist from the schematic, loads footprints, places them from the layout, adds outline, GND pours, local copper zones (`CopperZone`), labels, escape stubs; `kicad-cli pcb upgrade --force` re-saves it | `kicad/<name>.kicad_pcb` |
 | route | deletes old unlocked tracks → DSN written by pcbgen (pours hidden from the router) → Freerouting on 8 footprint orders, 4 at a time, fanout off; the best is kept (fewest unrouted, then least track under class width, fewest vias, shortest) → SES read back → kicad-cli zone fill → stitching vias (GND, plus `stitch_local` nets) → fill | same file; the winner's work files in `kicad/route/`, each order's in `route/try-<n>/`, scores in `route/tries.json` |
 | check | netlist round trip, net-class patterns, ERC, DRC (JLCPCB rules, schematic parity), routing report; fails on any error, unwaived warning, unrouted connection or copper in a keep-out | `kicad/reports/{erc,drc,routing}.json` |
-| fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections; lists parts whose rotation is UNVERIFIED | `fab/` (see `fab/README.md`) |
+| fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections (bottom side: 180 − angle, as kicad-jlcpcb-tools); lists parts whose rotation is UNVERIFIED, and every bottom-side part | `fab/` (see `fab/README.md`) |
 
-`scripts/render.sh boards/<name> [out.png] [layers]` renders the top side to look at.
+`scripts/render.sh boards/<name> [out.png] [layers]` renders the top side to look at (`B.Cu,B.Fab,B.Courtyard,B.SilkS,Edge.Cuts` for the back).
+`scripts/fr-violations/run.sh <board.dsn>` lists the clearance violations Freerouting counts, with the items involved (D-018).
 
 ## Tests
 - `cargo test --release`: unit tests that need no KiCad (DSN writer conventions and pad shapes, SES reader, stitching grid, router log and score, net-class globs, geometry).
@@ -43,7 +44,7 @@ With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and
   - A bad symbol, pin or double connection panics at the line that made it.
 - `src/layout.rs`: `layout() -> Layout` with
   - `rules`: net classes (`NetClass::new(name, track, clearance, via_dia, via_drill).patterns(..)`).
-  - `spec`: board size, `places` (every reference: `at(x, y)` or `at_rot(x, y, deg)`, mm from the top-left with Y down), silk `Text` labels, and `CopperZone`s (local pours of one net, e.g. regulator cooling copper; filled above GND).
+  - `spec`: board size, `places` (every reference: `at(x, y)`, `at_rot(x, y, deg)` or `at_bottom(x, y, deg)` for the back side, mm from the top-left with Y down; a bottom part's angle is the one KiCad shows, D-018), silk `Text` labels, and `CopperZone`s (local pours of one net, e.g. regulator cooling copper; filled above GND).
   - `route`: Freerouting and stitching options (`RouteOptions`: `tries`, `parallel`, `fanout`, stitching).
   - `waivers`: `Waiver { kind, substring, reason }` entries.
 - Generated: `kicad/` and `fab/`.

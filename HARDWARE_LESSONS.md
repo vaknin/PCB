@@ -75,6 +75,16 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - KiCad saves footprints ordered by UUID, so a line diff of two boards is useless; compare footprints by reference.
   - A hidden field with no `(thickness)` gets 0.15 mm on load; write `(thickness 0)` to keep pcbnew's.
   - Rotating a footprint-frame point into the board: (x·cos + y·sin, −x·sin + y·cos), angle CCW, Y down.
+- **KiCad 10 bottom-side footprints (verified 2026-09-29 against boards pcbnew saved after `fp.Flip(pos, FLIP_DIRECTION_LEFT_RIGHT)`; pcbgen's `footprint::flip` reproduces them item by item):**
+  - A flipped footprint keeps its library items in its own frame with every Y negated (`at`, `start`/`end`/`mid`/`center`, `xy`, pad primitives, drill `offset`); the footprint's `(layer "B.Cu")` and its `at` angle then work as on the top. Zones in it are in board coordinates, as on the top.
+  - F.* ↔ B.* on every layer name; `*.Cu`, `F&B.Cu` and user layers stay.
+  - Pads: relative angle a → −a; trapezoid `rect_delta` dy → −dy; chamfer corners top ↔ bottom. The 3D `model` entry is left unchanged.
+  - Texts and fields: relative angle a → −a; if that is under 180° (mod 360) it turns a further 180° and keeps its justification, otherwise left/right and top/bottom swap. `mirror` toggles only on F./B. layers (a Cmts.User text stays unmirrored). An `(unlocked yes)` text becomes 180° − a and keeps its justification.
+  - Flip-then-rotate and rotate-then-flip differ: flipping a part at angle r gives angle 180 − r, with texts turned 180° from flip-then-rotate. pcbgen's `at_bottom(x, y, rot)` is flip at 0, then turn to `rot` (the angle KiCad shows).
+  - Past 0/90/180/270, KiCad re-saves a flipped `fp_rect` as an `fp_poly` (same corners, its own point order).
+  - **DSN:** KiCad's `ExportSpecctraDSN` writes a bottom part's image as the unflipped (top-side) footprint, with top-side layers, and places it `back` at its angle + 180. A top and a bottom copy share one image. Freerouting puts the pins where the board has them, on the back layer (checked with Freerouting's own DSN reader, 2026-09-29).
+  - `kicad-cli pcb export pos` gives a bottom part's raw KiCad angle, and X is not negated unless you pass `--bottom-negate-x`.
+- **Pads with a drill `offset`:** the pad's position is the hole; the copper shape is shifted by the offset in the pad's frame. KiCad's DSN export shifts the padstack shapes and names them `Oval[A][dx,dy]Pad_...`; pcbgen does too, since D-018; before that it wrote the copper centred on the hole.
 - **Freerouting 2.4.x:**
   - It needs Java 25.
   - KiCad's DSN export omits board-edge clearance, so pass `--router.copperToEdgeClearanceUm=500`.
@@ -84,6 +94,11 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
 - **Freerouting's fanout stage narrows tracks** to 3/4 or 3/5 of their class width (0.225 mm on a 0.3 mm class, 0.15 on 0.2); read from its code, verified 2026-09-29. With `--router.fanout.enabled=false` the starter board routes with none of that and fewer vias. `router.automaticNeckdown=false` does not stop it. pcbgen turns fanout off (D-017).
 - **Freerouting 2.4.1 settings on the command line** are its Java field names, not the JSON names: `--router.scoring.viaCosts=50`, `--router.fanout.enabled=false`, `--router.resultJsonPath=FILE` (a JSON summary: score, clearance violations, trace and via counts). A wrong name only logs "Unknown settings property" (`router.via_costs` did). List them with `javap -p -cp <unzipped jar> app.freerouting.settings.RouterSettings` (also `ScoringSettings`, `FanoutSettings`, `OptimizerSettings`).
 - **Freerouting in parallel:** ~21 s alone, ~54 s each with 4 at once on this laptop (memory-bound); thread and GC settings don't help, and the result is the same whatever the thread count.
+- **Freerouting's "N violations" on the starter board are all by design (verified 2026-09-29).** Freerouting's own reader, loading `route/try-0/board.dsn`, lists:
+  - 12: the ESP32 EPAD's 12 thermal holes overlapping the pad (same net)
+  - 4: the HRO USB-C footprint's stacked pad pairs (A1/B12, A12/B1, A4/B9, A9/B4; same net, same place)
+  - 4: the locked SHT40 escape stubs, inside the sensor's own keep-out notch (D-010)
+  The count is there before the first track is laid and never changes. Freerouting flags same-net overlapping pins and fixed wires in keep-outs; KiCad's DRC doesn't, correctly. To list the violations, run the probe described in D-018: Freerouting's `DsnReader.readBoard`, then `Item.clearanceViolations()`.
 - **Freerouting takes the convex hull of every padstack polygon** (its `Library` parser), so a non-convex custom pad is a convex one to the router.
 - **KiCad 10 still ships the SWIG `pcbnew` module** (`/usr/bin/python3 -c "import pcbnew"`). pcbgen doesn't use it, but `pcbnew.ExportSpecctraDSN(board, path)` is a handy reference to check pcbgen's DSN against (D-017). Gone in KiCad 11.
 - **`kicad-cli pcb drc --refill-zones --save-board`** is the headless zone fill (there is no separate fill command). `gates::fill_zones` uses it. The saved `filled_polygon`s are single outlines with their holes joined in by zero-width cuts; stitching reads them.
@@ -96,6 +111,7 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
 - **`.kicad_pro` churn:** the `sch` stage writes a minimal project file; kicad-cli (DRC with `--save-board`) rewrites it in KiCad's full format with the same settings. So running `sch` alone shows a big diff in `.kicad_pro` that means nothing; commit it after a full run.
 
 - **JLCPCB CPL rotations:** the community correction table is `matthewlai/JLCKicadTools/jlc_kicad_tools/cpl_rotations_db.csv` (the kicad-jlcpcb-tools plugin downloads it). Entries used here: `^SOT-223` +180, `^SOT-23` −90, `^USB_C_Receptacle_HRO_TYPE-C-31-M-12` +180. The ESP32-S3-WROOM-1, the SHT4x DFN, JST SH, TS-1187A switches, LEDs and SOD-123F have no entry (UNVERIFIED; check the JLCPCB preview).
+- **JLCPCB CPL, bottom side (UNVERIFIED with JLCPCB):** kicad-jlcpcb-tools writes a bottom part's rotation as 180 − KiCad's angle, then adds the same package correction, and uses the position as seen from the top (`fabrication.py`, `_rotation_for_match`, main branch read 2026-09-29). pcbgen's CPL follows it and lists every bottom part as UNVERIFIED for the preview check.
 
 ## Mistakes to avoid
 - **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
