@@ -3,6 +3,25 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-022 Workflow: brainstorm first, spec as Markdown + TOML, simulate instead of prototyping, review rounds before ordering (DECIDED with the owner, 2026-09-29)
+- **Owner's input:**
+  - Brainstorming comes first and should last a while.
+  - Firmware (ESP-IDF) comes before the PCB.
+  - The owner has a dev board, but no time or energy to buy modules or solder.
+  - "By iteration I meant before placing the order."
+  - Wants efficiency and accuracy.
+- **Decided:** `docs/workflow.md` (it refines the brief's phases 2–7; the brief stays verbatim):
+  - a brainstorm phase that ends when the owner says so
+  - `spec.md` plus `board.toml` as the single source of pins, power and requirement IDs, read by both the circuit code and the firmware
+  - firmware in Wokwi simulation; the first assembled PCB is the prototype, built for rework
+  - design rounds, each ending in a review page, tagged in git, until the owner says "freeze"
+- **Why Markdown + TOML, not a custom language:**
+  - Markdown is what the owner reads.
+  - TOML is what code checks.
+  - A new language would add a parser and its bugs without adding accuracy.
+  - The accuracy comes from gates that fail when the spec, circuit and firmware disagree.
+- **Not built yet:** the `board.toml` reader, the firmware header generator, the requirement-coverage gate and the review page. Each gets built when the first real project reaches it.
+
 ## D-021 Ordering several different boards per shipment: separate orders in one parcel (A) for now; a shared panel (B) documented (DECIDED by the owner, 2026-09-29)
 - **The need:** 1–2 copies each of about 5 different boards per shipment, never 5 copies of one board.
 - **Name clash:** these A/B options are about *how orders are grouped*. The A/B/C table in `docs/brief.md` is about *who assembles* (fab / mixed / owner); they are separate choices.
