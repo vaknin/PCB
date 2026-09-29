@@ -1,0 +1,138 @@
+{
+  "Button_Switch_SMD.3dshapes/SW_Push_1P1T_XKB_TS-1187A.step": {
+    "source": "EasyEDA model of LCSC C318884 via easyeda2kicad 1.0.1 (SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.step)",
+    "rot_z": 0,
+    "move": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "why": "already centred: legs at (\u00b13.05, \u00b11.85) on the pads (\u00b13, \u00b11.875), body = F.Fab 6.5 \u00d7 5.1",
+    "bbox": [
+      -3.25,
+      3.25,
+      -2.6,
+      2.601,
+      -0.05,
+      1.5
+    ],
+    "sha256": "495f7d8f6dea026fc4fe5832e7978f307a81bef8138604a0020b2c381227bee1"
+  },
+  "Button_Switch_SMD.3dshapes/SW_Push_1TS009xxxx-xxxx-xxxx_6x6x5mm.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Button_Switch_SMD.3dshapes/SW_Push_1TS009xxxx-xxxx-xxxx_6x6x5mm.step",
+    "sha256": "9c96ae53015f3080e3fd0af3d780178a3880b06312b77cd5287162dbb5ce0ecb"
+  },
+  "Button_Switch_SMD.3dshapes/SW_SPST_TS-1088-xR020.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Button_Switch_SMD.3dshapes/SW_SPST_TS-1088-xR020.step",
+    "sha256": "ebfe1a50181c9a502cd98b44b03a5ce8568ff7c77d4fd5906caaef4b9a290da8"
+  },
+  "Capacitor_SMD.3dshapes/C_0805_2012Metric.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Capacitor_SMD.3dshapes/C_0805_2012Metric.step",
+    "sha256": "9a669c1a2f1ea25b88b401acef6efeaa80a067bd7da9db6993de719a7fbe155c"
+  },
+  "Connector_JST.3dshapes/JST_PH_S2B-PH-SM4-TB_1x02-1MP_P2.00mm_Horizontal.step": {
+    "source": "EasyEDA model of LCSC C295747 via easyeda2kicad 1.0.1 (CONN-SMD_P2.00_S2B-PH-SM4-TB-LF-SN.step)",
+    "rot_z": 0,
+    "move": [
+      1.0,
+      -2.75,
+      0.0
+    ],
+    "why": "signal legs centred on pads 1-2 (x \u00b11, footprint y -2.85), body x \u00b13.95 and mouth at the F.Fab edge y = +4.40",
+    "bbox": [
+      -3.95,
+      3.95,
+      -4.4,
+      4.2,
+      -0.0,
+      5.501
+    ],
+    "sha256": "b85c94646956bd3fe469d6172d0da6294e847d0af1d056cdf573c16a2415881f"
+  },
+  "Connector_JST.3dshapes/JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Connector_JST.3dshapes/JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal.step",
+    "sha256": "4b0f89a75d3758add0041ca9e5ded3a780c23ef4e3e99bcc398b41177dff5d0f"
+  },
+  "Connector_USB.3dshapes/USB_C_Receptacle_HRO_TYPE-C-31-M-12.step": {
+    "source": "EasyEDA model of LCSC C165948 via easyeda2kicad 1.0.1 (USB-C_SMD-TYPE-C-31-M-12_1.step)",
+    "rot_z": 180,
+    "move": [
+      0.0,
+      -1.05,
+      0.0
+    ],
+    "why": "pegs land on the NPTH holes (\u00b12.89, -2.6) and the shell legs on the SH pads (\u00b14.32, -3.13 / 1.05); the mouth ends at the F.Fab edge y = +3.65",
+    "bbox": [
+      -4.47,
+      4.47,
+      -3.65,
+      4.25,
+      -0.85,
+      3.251
+    ],
+    "sha256": "b3cb3fba00bceb0102b7c73520bed7e919c3e6dbdf3ac73a6917ceac33e6653c"
+  },
+  "Diode_SMD.3dshapes/D_SOD-123F.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Diode_SMD.3dshapes/D_SOD-123F.step",
+    "sha256": "132323445e3d1f9231e81c083cd88a33cd204dd8b96063bb2ed1f3ab4470c7e7"
+  },
+  "Fuse.3dshapes/Fuse_1206_3216Metric.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Fuse.3dshapes/Fuse_1206_3216Metric.step",
+    "sha256": "5e6dcbe286696143d35a8ea37d91eef4b54ff3d1bd7c2c2b4dedda83d3f8e203"
+  },
+  "LED_SMD.3dshapes/LED_0805_2012Metric.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/LED_SMD.3dshapes/LED_0805_2012Metric.step",
+    "sha256": "0aa8b791804f5d72a2fc7d1bf231dd9959207d83df8ad801176fbc459f575b98"
+  },
+  "Package_TO_SOT_SMD.3dshapes/SOT-223.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Package_TO_SOT_SMD.3dshapes/SOT-223.step",
+    "sha256": "77ad6dbacc493cb619c728f26d2ddcf461eb0feb6b977b47d01d51e67016f654"
+  },
+  "Package_TO_SOT_SMD.3dshapes/SOT-23.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Package_TO_SOT_SMD.3dshapes/SOT-23.step",
+    "sha256": "dd5d1711204e1d8d26cd11490923bd84340820baa69538c385a4300ec2539bc0"
+  },
+  "RF_Module.3dshapes/ESP32-S3-WROOM-1.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/RF_Module.3dshapes/ESP32-S3-WROOM-1.step",
+    "sha256": "3e35bb7ba7d030d88855fcf968398c8670934c7dca08b4e30b2c578bc1e13954"
+  },
+  "Resistor_SMD.3dshapes/R_0805_2012Metric.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Resistor_SMD.3dshapes/R_0805_2012Metric.step",
+    "sha256": "ded342cdb394fb45395227beaaa75cc390613cf2581b29cd6d22c12abd6103b2"
+  },
+  "Sensor_Audio.3dshapes/InvenSense_ICS-43434-6_3.5x2.65mm.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Sensor_Audio.3dshapes/InvenSense_ICS-43434-6_3.5x2.65mm.step",
+    "sha256": "f02a7427658e9b815639a8599501b47d22fa9c90982458b2b8627ea69254b506"
+  },
+  "Sensor_Humidity.3dshapes/Sensirion_DFN-4_1.5x1.5mm_P0.8mm_SHT4x_NoCentralPad.step": {
+    "source": "EasyEDA model of LCSC C2909890 via easyeda2kicad 1.0.1 (DFN-4_L1.5-W1.5-P0.8.step)",
+    "rot_z": 0,
+    "move": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "why": "already centred: terminals at (\u00b10.61, \u00b10.40) on the pads (\u00b10.7, \u00b10.4), body = F.Fab 1.5 \u00d7 1.5",
+    "bbox": [
+      -0.76,
+      0.76,
+      -0.76,
+      0.76,
+      -0.01,
+      0.55
+    ],
+    "sha256": "9ae1fccd87f1d02c45eaf0d80f9200bbef8ba70e4ba5cec78ca129bfd96e0933"
+  }
+}

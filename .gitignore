@@ -4,3 +4,5 @@ boards/*/kicad/route/
 boards/*/kicad/*-backups/
 target/
 boards/*/review/
+enclosure/.venv/
+__pycache__/

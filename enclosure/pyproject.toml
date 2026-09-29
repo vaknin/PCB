@@ -1,0 +1,14 @@
+# Enclosure tooling (D-025 Phase B): CadQuery builds the case from pcbgen's case/board.json and
+# checks it against the KiCad board STEP. pcbgen runs `enclosure/.venv/bin/python enclosure/case.py`.
+# Install: `cd enclosure && uv sync` (the .venv is ~1.7 GB and gitignored).
+[project]
+name = "pcb-enclosure"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "cadquery==2.8.0",
+    "easyeda2kicad==1.0.1",
+]
+
+[tool.uv]
+package = false
