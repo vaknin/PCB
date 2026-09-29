@@ -27,6 +27,9 @@ Anything unverified goes in `DECISIONS.md` open questions or is tagged UNVERIFIE
   - (since 2026-06-02)
 
 ## Tool gotchas
+- **Laptop (verified 2026-09-29):** `kicad-cli` 10.0.6. `import pcbnew` works from system Python 3.14
+  (`/usr/lib/python3.14/site-packages/pcbnew.py`). Build venvs with `uv venv --python /usr/bin/python3 --system-site-packages`.
+  Libraries are in `/usr/share/kicad/{symbols,footprints}`; no 3D models yet.
 - **tscircuit autorouter:**
   - It can report success and still leave shorts (overlapping vias, a via on a pad). Always run `tsci check shorts` and an independent KiCad DRC.
   - It does not enforce USB differential pairs.

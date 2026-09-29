@@ -51,7 +51,7 @@ NextPCB's Rev 0 free-assembly offer rejects boards smaller than 50×50 mm. A sta
 board that size or larger keeps that option open, and it costs essentially nothing extra
 at JLCPCB (the 5-board price covers up to 100×100).
 
-## D-001 Laptop toolchain (DECIDED, technical; sudo parts pending owner)
+## D-001 Laptop toolchain (DONE 2026-09-29: KiCad 10.0.6 + kicad-library installed, user in `uucp`)
 - **KiCad 10.0.6 from Arch `extra`** (`kicad`, `kicad-library`). The 3D library
   (`kicad-library-3d`, 3.2 GB) is deferred to the enclosure phase.
   KiCad 10 over 9: it is current, kicad-cli has JSON DRC/ERC, and Freerouting and the MCP server target it. The one tool that needed 9 (atopile) is dropped (D-003).
