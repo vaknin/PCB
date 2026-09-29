@@ -120,6 +120,17 @@ fn padstack(pad: &Pad) -> Result<Option<(String, String)>> {
                 format!("(polygon {{L}} 0  {text})"),
             )
         }
+        "trapezoid" | "custom" => {
+            let Some(poly) = &pad.poly else { bail!("{shape} pad {} has no outline", pad.number) };
+            // Y up; closed
+            let text = closed(poly).iter().map(|p| format!("{} {}", um(p.x), um(-p.y))).collect::<Vec<_>>().join("  ");
+            let name = if shape == "trapezoid" {
+                format!("Trapz[{tag}]Pad_{}x{}_{}_um", um(w), um(h), fnv(&text))
+            } else {
+                format!("Cust[{tag}]Pad_{}x{}_{}_um", um(w), um(h), fnv(&text))
+            };
+            (name, format!("(polygon {{L}} 0  {text})"))
+        }
         s => bail!("pad shape {s:?} is not supported by the DSN writer yet"),
     };
     let mut out = String::new();
@@ -128,6 +139,12 @@ fn padstack(pad: &Pad) -> Result<Option<(String, String)>> {
     }
     out.push_str("      (attach off)\n");
     Ok(Some((name, out)))
+}
+
+/// Short stable hash of a padstack's shape text, to name padstacks that differ only in it.
+fn fnv(s: &str) -> String {
+    let h = s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    format!("{:08X}", h >> 32)
 }
 
 fn keepout_kind(k: &RuleArea) -> Option<&'static str> {
@@ -144,7 +161,8 @@ fn keepout_layers(k: &RuleArea) -> Vec<&'static str> {
 }
 
 /// Pin names per footprint pad: repeated pad numbers get "@1", "@2", ... in file order,
-/// as KiCad's exporter names them. None for pads that aren't pins (NPTH, no copper).
+/// and unnumbered pads are "@1", "@2", ..., as KiCad's exporter names them (checked
+/// against its DSN export). None for pads that aren't pins (NPTH, no copper).
 pub fn pin_names(fp: &Footprint) -> Vec<Option<String>> {
     let mut seen: HashMap<&str, usize> = HashMap::new();
     fp.pads
@@ -154,7 +172,11 @@ pub fn pin_names(fp: &Footprint) -> Vec<Option<String>> {
                 return None;
             }
             let n = seen.entry(&p.number).or_insert(0);
-            let name = if *n == 0 { p.number.clone() } else { format!("{}@{}", p.number, n) };
+            if *n == 0 && !p.number.is_empty() {
+                *n += 1;
+                return Some(p.number.clone());
+            }
+            let name = format!("{}@{}", p.number, *n + usize::from(p.number.is_empty()));
             *n += 1;
             Some(name)
         })
@@ -357,7 +379,10 @@ mod tests {
     (pad "1" smd rect (at 1 0 90) (size 0.5 0.5) (layers "F.Cu" "F.Mask") (net "GND"))
     (pad "" np_thru_hole circle (at 0 1 90) (size 1 1) (drill 1) (layers "*.Cu" "*.Mask"))
     (pad "3" smd rect (at 0 -1 90) (size 0.5 0.5) (layers "F.Paste"))
-    (pad "4" smd rect (at 0 -2 90) (size 0.5 0.5) (layers "F.Cu") (net "unconnected-(U1-Pad4)")))
+    (pad "4" smd rect (at 0 -2 90) (size 0.5 0.5) (layers "F.Cu") (net "unconnected-(U1-Pad4)"))
+    (pad "" smd circle (at 2 2 90) (size 0.3 0.3) (layers "F.Cu"))
+    (pad "" smd circle (at 2 3 90) (size 0.3 0.3) (layers "F.Cu"))
+    (pad "1" smd rect (at 1 2 90) (size 0.5 0.5) (layers "F.Cu") (net "GND")))
   (segment (start 104 104) (end 104 103) (width 0.2) (layer "F.Cu") (net "GND") (locked yes))
 )"#;
 
@@ -369,7 +394,8 @@ mod tests {
     fn pin_names_follow_kicad() {
         let b = board();
         let names = pin_names(&b.footprints[0]);
-        assert_eq!(names, [Some("1".into()), Some("1@1".into()), None, None, Some("4".into())]);
+        let names: Vec<Option<&str>> = names.iter().map(|n| n.as_deref()).collect();
+        assert_eq!(names, [Some("1"), Some("1@1"), None, None, Some("4"), Some("@1"), Some("@2"), Some("1@2")]);
     }
 
     #[test]
@@ -447,7 +473,7 @@ mod tests {
         has("(pin Rect[T]Pad_500x500_um 4 0 2000)");
         // NPTH: a keep-out of drill + 2 × hole clearance
         has("(keepout \"\" (circle F.Cu 1500 0 -1000))");
-        has("(pins U1-1 U1-1@1)");
+        has("(pins U1-1 U1-1@1 U1-1@2)");
         has("(net \"unconnected-(U1-Pad4)\"\n      (pins U1-4)");
         has("(class Power GND\n      (circuit\n        (use_via \"Via[0-1]_800:400_um\")");
         has("(wire (path F.Cu 200  104000 -104000  104000 -103000)(net GND)(type fix))");
@@ -459,9 +485,9 @@ mod tests {
 
     #[test]
     fn refuses_what_it_cannot_write() {
-        let text = BOARD.replace("(pad \"1\" smd rect", "(pad \"1\" smd trapezoid");
+        let text = BOARD.replace("(footprint \"Test:Two\" (layer \"F.Cu\")", "(footprint \"Test:Two\" (layer \"B.Cu\")");
         let b = Board::from_sexp(&parse(&text).unwrap()).unwrap();
         let err = write(&b, &BoardRules::default(), 0.25, 0, &std::env::temp_dir().join("never.dsn")).unwrap_err();
-        assert!(err.to_string().contains("trapezoid"), "{err}");
+        assert!(err.to_string().contains("bottom-side"), "{err}");
     }
 }

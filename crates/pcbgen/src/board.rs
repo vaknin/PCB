@@ -6,7 +6,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use crate::geom::{Pt, arc_points, cos_sin, pt, rotate, round_rect_dist};
+use crate::geom::{Pt, arc_points, convex_hull, cos_sin, disc, edge_dist, inside, pt, rotate, round_rect_dist};
 use crate::sexpr::{Sexp, parse};
 
 /// The board's top-left corner on the KiCad page, mm.
@@ -36,6 +36,11 @@ pub struct Pad {
     pub rratio: f64,
     /// Absolute position.
     pub pos: Pt,
+    /// Copper outline in the pad's own frame (Y down, before its rotation) when the size
+    /// alone doesn't give it: a trapezoid's corners, or the convex hull of a custom pad's
+    /// anchor and primitives (conservative: it covers all the copper; Freerouting takes a
+    /// padstack polygon's convex hull anyway).
+    pub poly: Option<Vec<Pt>>,
 }
 
 impl Pad {
@@ -53,10 +58,13 @@ impl Pad {
         }
     }
 
-    /// Distance from `p` to the pad's copper (0 inside). Trapezoid and custom pads are
-    /// taken as their bounding rectangle (conservative).
+    /// Distance from `p` to the pad's copper (0 inside); custom pads by their convex hull.
+    /// Chamfered corners count as rounded ones (covering more copper, so conservative).
     pub fn dist(&self, p: Pt) -> f64 {
         let q = rotate(p - self.pos, -self.angle);
+        if let Some(poly) = &self.poly {
+            return if inside(q, poly) { 0.0 } else { edge_dist(q, poly) };
+        }
         if self.shape == "circle" {
             return (q.norm() - self.size.0 / 2.0).max(0.0);
         }
@@ -291,6 +299,7 @@ impl Footprint {
                 net: p.find("net").and_then(|x| x.items().last()).and_then(Sexp::atom).map(String::from),
                 rratio: p.find("roundrect_rratio").map_or(0.0, |r| r.num(1)),
                 pos: to_abs(local),
+                poly: pad_outline(p, size)?,
             });
         }
         let mut courtyards = shapes_on(n, "fp_", "F.CrtYd", &to_abs);
@@ -308,6 +317,68 @@ impl Footprint {
             courtyards,
             keepouts,
         })
+    }
+}
+
+/// Stroke width of a pad primitive: `(width w)` or `(stroke (width w))`.
+fn stroke_width(g: &Sexp) -> f64 {
+    g.find("width").or_else(|| g.find("stroke").and_then(|s| s.find("width"))).map_or(0.0, |w| w.num(1))
+}
+
+/// Outline of a trapezoid or custom pad in its own frame (see `Pad::poly`).
+fn pad_outline(p: &Sexp, (w, h): (f64, f64)) -> Result<Option<Vec<Pt>>> {
+    match p.arg(3) {
+        Some("trapezoid") => {
+            // KiCad's rect_delta: dx makes the left side taller than the right, dy makes the
+            // bottom wider than the top (Y down); checked against KiCad's DSN export
+            let d = p.find("rect_delta").map_or(pt(0.0, 0.0), |d| pt(d.num(1) / 2.0, d.num(2) / 2.0));
+            let (hw, hh) = (w / 2.0, h / 2.0);
+            Ok(Some(vec![
+                pt(-hw - d.y, hh + d.x),
+                pt(hw + d.y, hh - d.x),
+                pt(hw - d.y, -hh + d.x),
+                pt(-hw + d.y, -hh - d.x),
+            ]))
+        }
+        Some("custom") => {
+            let anchor = p.find("options").and_then(|o| o.get("anchor")).unwrap_or("rect");
+            let mut all: Vec<Pt> = match anchor {
+                "circle" => disc(pt(0.0, 0.0), w / 2.0, MAX_ERR),
+                _ => vec![pt(-w / 2.0, -h / 2.0), pt(w / 2.0, -h / 2.0), pt(w / 2.0, h / 2.0), pt(-w / 2.0, h / 2.0)],
+            };
+            // every primitive's outline, its stroke included (a round pen of that width)
+            let mut add = |outline: Vec<Pt>, width: f64| {
+                if width > 0.0 {
+                    for q in &outline {
+                        all.extend(disc(*q, width / 2.0, MAX_ERR));
+                    }
+                } else {
+                    all.extend(outline);
+                }
+            };
+            for g in p.find("primitives").map(|x| x.items()).unwrap_or_default() {
+                let width = stroke_width(g);
+                match g.head() {
+                    Some("gr_poly") => add(pts(g.find("pts")), width),
+                    Some("gr_rect") => {
+                        let (a, b) = (xy(g.find("start")), xy(g.find("end")));
+                        add(vec![a, pt(b.x, a.y), b, pt(a.x, b.y)], width);
+                    }
+                    Some("gr_line") => add(vec![xy(g.find("start")), xy(g.find("end"))], width),
+                    Some("gr_arc") => add(arc_points(xy(g.find("start")), xy(g.find("mid")), xy(g.find("end")), MAX_ERR), width),
+                    Some("gr_circle") => {
+                        let c = xy(g.find("center"));
+                        let r = (xy(g.find("end")) - c).norm();
+                        add(disc(c, r + width / 2.0, MAX_ERR), 0.0);
+                    }
+                    Some("gr_bbox") | Some("gr_vector") => {}
+                    Some(other) => bail!("custom pad primitive {other} is not supported yet"),
+                    None => {}
+                }
+            }
+            Ok(Some(convex_hull(&all)))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -413,6 +484,7 @@ mod tests {
             net: None,
             rratio,
             pos: pt(10.0, 10.0),
+            poly: None,
         }
     }
 

@@ -145,6 +145,44 @@ pub fn arc_points(start: Pt, mid: Pt, end: Pt, max_err: f64) -> Vec<Pt> {
     }).collect()
 }
 
+/// Convex hull (Andrew's monotone chain), counter-clockwise in a Y-up frame; collinear
+/// points dropped.
+pub fn convex_hull(pts: &[Pt]) -> Vec<Pt> {
+    let mut p = pts.to_vec();
+    p.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    p.dedup();
+    if p.len() < 3 {
+        return p;
+    }
+    let cross = |o: Pt, a: Pt, b: Pt| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    let mut hull: Vec<Pt> = Vec::with_capacity(p.len() + 1);
+    for pass in 0..2 {
+        let start = hull.len();
+        let iter: Box<dyn Iterator<Item = &Pt>> = if pass == 0 { Box::new(p.iter()) } else { Box::new(p.iter().rev()) };
+        for &q in iter {
+            while hull.len() >= start + 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], q) <= 0.0 {
+                hull.pop();
+            }
+            hull.push(q);
+        }
+        hull.pop(); // the last point starts the other chain
+    }
+    hull
+}
+
+/// A regular polygon *around* the circle (its sides touch it), so it covers the disc, with
+/// its corners at most `max_err` outside the circle.
+pub fn disc(c: Pt, r: f64, max_err: f64) -> Vec<Pt> {
+    let sides = ((std::f64::consts::PI / (r / (r + max_err)).acos()).ceil() as usize).max(8);
+    let ro = r / (std::f64::consts::PI / sides as f64).cos();
+    (0..sides)
+        .map(|i| {
+            let a = std::f64::consts::TAU * (i as f64 + 0.5) / sides as f64;
+            c + pt(ro * a.cos(), ro * a.sin())
+        })
+        .collect()
+}
+
 /// Distance from `p` (in the shape's own frame, centred) to a rounded rectangle of size
 /// w × h with corner radius `r` (0 = rectangle, min(w,h)/2 = oval). 0 inside.
 pub fn round_rect_dist(p: Pt, w: f64, h: f64, r: f64) -> f64 {
@@ -170,6 +208,17 @@ mod tests {
         let pts = arc_points(pt(1.0, 0.0), pt(0.0, 1.0), pt(-1.0, 0.0), 0.001);
         assert!(pts.iter().all(|p| (p.norm() - 1.0).abs() < 1e-9 && p.y >= -1e-9));
         assert!(pts.len() > 10);
+    }
+
+    #[test]
+    fn hull() {
+        let pts = [pt(0.0, 0.0), pt(2.0, 0.0), pt(1.0, 1.0), pt(2.0, 2.0), pt(0.0, 2.0), pt(1.0, 0.0), pt(0.0, 0.0)];
+        let h = convex_hull(&pts);
+        assert_eq!(h.len(), 4);
+        assert_eq!(area(&h), 4.0);
+        let d = disc(pt(1.0, 1.0), 1.0, 0.005);
+        assert!(d.iter().all(|q| (1.0..=1.005 + 1e-12).contains(&(*q - pt(1.0, 1.0)).norm())));
+        assert!(edge_dist(pt(1.0, 1.0), &d) >= 1.0 - 1e-12);
     }
 
     #[test]
