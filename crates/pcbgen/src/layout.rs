@@ -124,8 +124,20 @@ pub struct RouteOptions {
     pub edge_clearance_um: u32,
     pub via_costs: u32,
     pub timeout_s: u64,
-    /// Freerouting varies run to run; retry while any net is unrouted.
+    /// Footprint orders to route (Freerouting is deterministic, and the order of the
+    /// footprints in the DSN steers it). Every order is routed and the best result kept:
+    /// fewest unrouted, then least track thinner than its net class, then fewest vias,
+    /// then shortest. Order 0 is the board's own order.
     pub tries: u32,
+    /// Freerouting runs at a time. On the 8-core laptop 4 at a time take ~54 s each
+    /// against ~21 s alone (memory-bound; its thread settings change nothing): ~1.5× the
+    /// throughput of running them one by one.
+    pub parallel: usize,
+    /// Freerouting's fanout stage (escape tracks and vias from SMD pads before routing).
+    /// Off: fanout narrows tracks to 3/4 or 3/5 of their net-class width (read from
+    /// Freerouting 2.4.1's code) and added vias; without it the starter board routes
+    /// with no track under its class width and fewer vias (D-017).
+    pub fanout: bool,
     /// Add vias tying this net's pours together after routing.
     pub stitch_net: Option<String>,
     /// mm grid for stitching vias.
@@ -146,7 +158,9 @@ impl Default for RouteOptions {
             edge_clearance_um: 500,
             via_costs: 50,
             timeout_s: 900,
-            tries: 3,
+            tries: 8,
+            parallel: 4,
+            fanout: false,
             stitch_net: Some("GND".into()),
             stitch_pitch: 3.0,
             stitch_via: (0.6, 0.3),

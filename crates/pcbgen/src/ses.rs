@@ -27,8 +27,13 @@ pub struct RoutedVia {
 /// from `vias` (padstack name → diameter, drill), as written into the DSN.
 pub fn read(path: &Path, vias: &HashMap<String, (f64, f64)>) -> Result<(Vec<Track>, Vec<RoutedVia>)> {
     let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
-    let root = parse(&text)?;
-    let routes = root.find("routes").ok_or_else(|| anyhow!("{}: no routes", path.display()))?;
+    parse_str(&text, vias).with_context(|| path.display().to_string())
+}
+
+/// `read`, from the session's text.
+pub fn parse_str(text: &str, vias: &HashMap<String, (f64, f64)>) -> Result<(Vec<Track>, Vec<RoutedVia>)> {
+    let root = parse(text)?;
+    let routes = root.find("routes").ok_or_else(|| anyhow!("no routes"))?;
     // (resolution um 10): 10 units per µm
     let res = routes.find("resolution").ok_or_else(|| anyhow!("SES has no resolution"))?;
     let per_mm = match res.arg(1) {
@@ -60,4 +65,46 @@ pub fn read(path: &Path, vias: &HashMap<String, (f64, f64)>) -> Result<(Vec<Trac
         }
     }
     Ok((tracks, out_vias))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SES: &str = r#"(session "board.ses"
+  (base_design "board.dsn")
+  (routes
+    (resolution um 10)
+    (parser (host_cad "KiCad's Pcbnew") (host_version "x"))
+    (library_out (padstack "Via[0-1]_800:400_um" (shape (circle F.Cu 8000 0 0)) (attach off)))
+    (network_out
+      (net GND
+        (wire (path F.Cu 3000  1000000 -1000000  1010000 -1000000  1010000 -1020000))
+        (via "Via[0-1]_800:400_um" 1010000 -1020000)
+      )
+      (net "/USB_D-"
+        (wire (path B.Cu 2250  1000000 -1030000  1000000 -1040000))
+      )
+    )
+  )
+)"#;
+
+    #[test]
+    fn reads_tracks_and_vias() {
+        let vias = HashMap::from([("Via[0-1]_800:400_um".to_string(), (0.8, 0.4))]);
+        let (tracks, v) = parse_str(SES, &vias).unwrap();
+        assert_eq!(tracks.len(), 3);
+        // 10 units per µm; Y flips back to pointing down
+        assert_eq!((tracks[0].start, tracks[0].end), (pt(100.0, 100.0), pt(101.0, 100.0)));
+        assert_eq!(tracks[1].end, pt(101.0, 102.0));
+        assert_eq!((tracks[0].width, tracks[0].layer.as_str(), tracks[0].net.as_str()), (0.3, "F.Cu", "GND"));
+        assert_eq!((tracks[2].width, tracks[2].net.as_str()), (0.225, "/USB_D-"));
+        assert_eq!(v.len(), 1);
+        assert_eq!((v[0].at, v[0].size, v[0].drill, v[0].net.as_str()), (pt(101.0, 102.0), 0.8, 0.4, "GND"));
+    }
+
+    #[test]
+    fn refuses_unknown_via() {
+        assert!(parse_str(SES, &HashMap::new()).is_err());
+    }
 }

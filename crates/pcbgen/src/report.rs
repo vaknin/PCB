@@ -100,6 +100,11 @@ pub fn build(project_dir: &Path, name: &str, rules: &BoardRules, gnd_net: &str) 
         *by_net.entry(v.net.clone()).or_default() += 1;
     }
     let n_gnd = board.vias.iter().filter(|v| v.net == gnd_net).count();
+    // which Freerouting order the route stage kept, and how the others scored
+    let router: Value = std::fs::read_to_string(project_dir.join("route/tries.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(Value::Null);
     Ok(json!({
         "unrouted_connections": unconnected,
         "track_segments": board.segments.len(),
@@ -111,6 +116,7 @@ pub fn build(project_dir: &Path, name: &str, rules: &BoardRules, gnd_net: &str) 
         "copper_in_keepouts": in_keepout,
         "thinner_than_class_mm": thin.into_iter().map(|(k, v)| (k, json!(round1(v)))).collect::<serde_json::Map<_, _>>(),
         "pours": pours,
+        "router": router,
     }))
 }
 
@@ -131,6 +137,9 @@ pub fn run(project_dir: &Path, name: &str, rules: &BoardRules) -> Result<bool> {
             "   pour {key}: {}% of its outline filled, {} piece(s), largest {}% of it",
             p["filled_pct"], p["pieces"], p["largest_piece_pct_of_fill"]
         );
+    }
+    if let Some(k) = r["router"]["kept_order"].as_u64() {
+        println!("   router: kept footprint order {k} of {}", r["router"]["orders"].as_array().map_or(0, Vec::len));
     }
     for (net, mm) in r["thinner_than_class_mm"].as_object().unwrap() {
         println!("   note: {mm} mm of {net} track is thinner than its net class");
