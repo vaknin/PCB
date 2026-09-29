@@ -3,3 +3,4 @@ boards/*/kicad/*.kicad_prl
 boards/*/kicad/route/
 boards/*/kicad/*-backups/
 target/
+boards/*/review/

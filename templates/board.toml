@@ -1,0 +1,49 @@
+# board.toml: the facts the circuit, the firmware and the spec must agree on (D-022, D-023).
+# Copy to boards/<name>/board.toml. Checked by the BOARD.TOML gate (sch, check and fw stages);
+# the fw stage turns it into firmware/board_pins.h. Unknown keys are errors.
+
+[board]
+name = "<name>"        # must equal the circuit's name (Circuit::new)
+revision = "0"         # must equal the circuit's revision
+module = "U1"          # reference of the ESP32-S3-WROOM-1 module
+
+# One [[pin]] per module pin the circuit uses as a GPIO; the gate fails if the circuit
+# uses one that is not listed here.
+#   signal: firmware name, upper case (the header defines PIN_<signal>)
+#   pin:    the module symbol's pin name: IO0..IO48, TXD0 (GPIO 43), RXD0 (GPIO 44),
+#           USB_D- (GPIO 19), USB_D+ (GPIO 20)
+#   net:    the circuit net on that pin, as named in circuit.rs
+#   dir:    "in", "out" or "io"
+[[pin]]
+signal = "STATUS_LED"
+pin = "IO48"
+net = "STATUS"
+gpio = 48
+dir = "out"
+active_low = false     # optional; true adds PIN_<signal>_ACTIVE_LOW to the header
+note = ""              # optional; copied into the header comment
+
+[power]
+source = "USB-C 5 V"
+budget_ma = 500        # what the source may give; the loads must fit under it
+
+# Worst-case current of each load, at the input. Say where each number comes from;
+# write INFERRED in `source` if it is a guess.
+[[power.load]]
+name = "ESP32-S3 module, Wi-Fi transmit peak"
+ma = 355
+source = "WROOM-1 datasheet, HARDWARE_LESSONS.md"
+
+# One per requirement in spec.md, same IDs. covered_by lists what shows it is met:
+#   part:<ref>   a part in the circuit
+#   pin:<signal> a signal in the pin map above
+#   test:<name>  a firmware self-test below
+#   gate:<name>  erc, drc, netlist, netclasses, routing or board_toml
+[[requirement]]
+id = "R1"
+text = "Shows that it is running with a status light"
+covered_by = ["part:D2", "pin:STATUS_LED", "test:status_led"]
+
+[firmware]
+# Self-tests the firmware runs at bring-up and reports over USB; each must cover a requirement.
+self_test = ["status_led"]
