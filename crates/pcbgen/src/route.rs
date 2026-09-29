@@ -51,6 +51,12 @@ pub fn route(pcb: &Path, opts: &RouteOptions) -> Result<()> {
     }
     let work = pcb.parent().unwrap().join("route");
     std::fs::create_dir_all(&work)?;
+    // earlier runs' orders, so route/ only holds this run's
+    for e in std::fs::read_dir(&work)?.flatten() {
+        if e.file_name().to_string_lossy().starts_with("try-") {
+            std::fs::remove_dir_all(e.path())?;
+        }
+    }
     let name = board_name(pcb);
 
     // drop earlier routing so re-runs start clean; locked tracks (escape stubs) stay
@@ -86,19 +92,20 @@ pub fn route(pcb: &Path, opts: &RouteOptions) -> Result<()> {
             .collect();
         workers.into_iter().flat_map(|w| w.join().expect("routing thread panicked")).collect()
     });
-    let mut tries: Vec<Try> = vec![];
-    for (seed, r) in results {
-        match r {
-            Ok(t) => tries.push(t),
-            Err(e) => println!("freerouting: order {seed} dropped: {e:#}"),
-        }
-    }
+    // failed orders were reported as they finished
+    let mut tries: Vec<Try> = results.into_iter().filter_map(|(_, r)| r.ok()).collect();
     tries.sort_by_key(|t| t.seed);
     // ties go to the lowest order (min_by keeps the first)
     let Some(best) = tries.iter().min_by(|a, b| a.key().cmp(&b.key())) else {
         bail!("every Freerouting run failed; see {}/try-*/freerouting.log", work.display());
     };
     println!("freerouting: kept order {} of {} ({:.0} s in all): {}", best.seed, tries.len(), t0.elapsed().as_secs_f64(), best.summary());
+    if !best.unrouted.is_empty() {
+        println!(
+            "freerouting: WARNING: every order left connections unrouted; the check stage will fail. Route more orders \
+             (--tries), or give the router room (placement, net-class widths)"
+        );
+    }
     // the winner's files where a reader expects them
     for f in ["board.dsn", "board.ses", "freerouting.log"] {
         std::fs::copy(best.dir.join(f), work.join(f))?;
