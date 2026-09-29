@@ -1,0 +1,15 @@
+[package]
+name = "pcbgen"
+version = "0.2.0"
+description = "Circuit code to checked KiCad 10 boards and JLCPCB fab files"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+csv = "1.4.0"
+regex = "1.13.1"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+uuid = { version = "1.26.1", features = ["v5"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
