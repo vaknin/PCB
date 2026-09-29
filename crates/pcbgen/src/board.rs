@@ -394,3 +394,44 @@ impl Board {
         h
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pad(shape: &str, size: (f64, f64), angle: f64, rratio: f64) -> Pad {
+        Pad {
+            number: "1".into(),
+            kind: "smd".into(),
+            shape: shape.into(),
+            local: pt(0.0, 0.0),
+            angle,
+            rel_angle: angle,
+            size,
+            drill: None,
+            layers: vec!["F.Cu".into()],
+            net: None,
+            rratio,
+            pos: pt(10.0, 10.0),
+        }
+    }
+
+    #[test]
+    fn pad_distance() {
+        assert!((pad("circle", (1.0, 1.0), 0.0, 0.0).dist(pt(12.0, 10.0)) - 1.5).abs() < 1e-12);
+        let r = pad("rect", (2.0, 1.0), 0.0, 0.0);
+        assert_eq!(r.dist(pt(10.5, 10.2)), 0.0);
+        assert!((r.dist(pt(12.0, 10.0)) - 1.0).abs() < 1e-12);
+        // rotated 90°: the long side runs along Y
+        assert!((pad("rect", (2.0, 1.0), 90.0, 0.0).dist(pt(10.0, 12.0)) - 1.0).abs() < 1e-12);
+        // a roundrect corner is cut back by its radius
+        let rr = pad("roundrect", (2.0, 2.0), 0.0, 0.25);
+        let corner = pt(11.0, 11.0);
+        assert!((rr.dist(corner) - (0.5 * 2f64.sqrt() - 0.5)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn layer_patterns() {
+        assert!(layer_match("*.Cu", "B.Cu") && layer_match("F&B.Cu", "F.Cu") && !layer_match("F.Cu", "B.Cu"));
+    }
+}

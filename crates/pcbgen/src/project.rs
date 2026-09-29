@@ -221,5 +221,11 @@ mod tests {
         assert!(!glob("USB_D+", "/USB_D+"));
         assert!(glob("+3V3", "+3V3"));
         assert!(glob("I2C_S[CD][AL]", "I2C_SDA"));
+        assert!(glob("LED?", "LED1") && !glob("LED?", "LED10"));
+        assert!(glob("IO[0-9]", "IO7") && !glob("IO[!0-9]", "IO7"));
+        assert!(glob("*", "") && glob("*GND*", "GND"));
+        // an unclosed '[' is a literal, as fnmatch
+        assert!(glob("A[", "A[") && !glob("A[", "AB"));
+        assert!(!glob("gnd", "GND"), "case-sensitive");
     }
 }

@@ -109,3 +109,25 @@ pub fn stitch(board: &Board, opts: &RouteOptions, net: &str, pitch: f64) -> Vec<
     }
     added
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sexpr::parse;
+
+    /// The grid starts half a step inside the edge bounding box, which includes half the
+    /// Edge.Cuts stroke: a 50 mm board at (100, 100) with a 0.1 mm edge starts at 101.45.
+    #[test]
+    fn grid_origin() {
+        let b = Board::from_sexp(
+            &parse(r#"(kicad_pcb (gr_rect (start 100 100) (end 150 150) (stroke (width 0.1)) (layer "Edge.Cuts")))"#).unwrap(),
+        )
+        .unwrap();
+        let (lo, hi) = b.edge_bbox();
+        assert_eq!((lo, hi), (pt(99.95, 99.95), pt(150.05, 150.05)));
+        let g = grid(lo, hi, 3.0);
+        assert_eq!(g[0], pt(101.45, 101.45));
+        assert_eq!(g.len(), 17 * 17);
+        assert!(g.iter().all(|p| p.x < 150.05 && p.y < 150.05));
+    }
+}

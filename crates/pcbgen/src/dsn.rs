@@ -338,3 +338,130 @@ pub fn write(board: &Board, rules: &BoardRules, hole_clearance: f64, seed: u64, 
     std::fs::write(path, o)?;
     Ok(via_table)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::{inside, round_rect_dist};
+    use crate::project::NetClass;
+    use crate::sexpr::parse;
+
+    /// A 10 × 10 mm board with one footprint at (105, 105) rotated 90°: a roundrect pad and a
+    /// rect pad sharing the number "1", an NPTH hole, a paste-only pad, and one locked stub.
+    /// Pad angles include the footprint's rotation, as KiCad saves them.
+    const BOARD: &str = r#"(kicad_pcb
+  (gr_rect (start 100 100) (end 110 110) (stroke (width 0.1)) (layer "Edge.Cuts"))
+  (footprint "Test:Two" (layer "F.Cu") (at 105 105 90)
+    (property "Reference" "U1") (property "Value" "X")
+    (pad "1" smd roundrect (at -1 0 180) (size 1 0.6) (layers "F.Cu" "F.Mask") (roundrect_rratio 0.25) (net "GND"))
+    (pad "1" smd rect (at 1 0 90) (size 0.5 0.5) (layers "F.Cu" "F.Mask") (net "GND"))
+    (pad "" np_thru_hole circle (at 0 1 90) (size 1 1) (drill 1) (layers "*.Cu" "*.Mask"))
+    (pad "3" smd rect (at 0 -1 90) (size 0.5 0.5) (layers "F.Paste"))
+    (pad "4" smd rect (at 0 -2 90) (size 0.5 0.5) (layers "F.Cu") (net "unconnected-(U1-Pad4)")))
+  (segment (start 104 104) (end 104 103) (width 0.2) (layer "F.Cu") (net "GND") (locked yes))
+)"#;
+
+    fn board() -> Board {
+        Board::from_sexp(&parse(BOARD).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn pin_names_follow_kicad() {
+        let b = board();
+        let names = pin_names(&b.footprints[0]);
+        assert_eq!(names, [Some("1".into()), Some("1@1".into()), None, None, Some("4".into())]);
+    }
+
+    #[test]
+    fn quoting() {
+        assert_eq!(q("GND"), "GND");
+        assert_eq!(q("/USB_D-"), "\"/USB_D-\"");
+        assert_eq!(q("unconnected-(U1-Pad4)"), "\"unconnected-(U1-Pad4)\"");
+        assert_eq!(q(""), "\"\"");
+        // the reader splits pin references on their first '-'
+        assert_eq!(q_pin("U1-1@1"), "U1-1@1");
+        assert_eq!(q_pin("U1-A 1"), "\"U1-A 1\"");
+    }
+
+    #[test]
+    fn footprint_orders() {
+        assert_eq!(footprint_order(5, 0), [0, 1, 2, 3, 4]);
+        for seed in 1..20 {
+            let mut o = footprint_order(30, seed);
+            assert_eq!(o, footprint_order(30, seed), "reproducible");
+            o.sort();
+            assert_eq!(o, (0..30).collect::<Vec<_>>(), "a permutation");
+        }
+        assert_ne!(footprint_order(30, 1), footprint_order(30, 2));
+    }
+
+    /// The roundrect polygon covers all the pad's copper and lies at most 1 µm outside it.
+    #[test]
+    fn roundrect_polygon_covers_pad() {
+        let b = board();
+        let pad = &b.footprints[0].pads[0];
+        let (_, body) = padstack(pad).unwrap().unwrap();
+        let line = body.lines().next().unwrap();
+        let nums: Vec<f64> = line
+            .trim_start_matches("      (shape (polygon F.Cu 0  ")
+            .trim_end_matches("))")
+            .split_whitespace()
+            .map(|v| v.parse::<f64>().unwrap() / 1000.0)
+            .collect();
+        let poly: Vec<Pt> = nums.as_chunks::<2>().0.iter().map(|&[x, y]| pt(x, y)).collect();
+        assert!(poly.len() > 8);
+        let (w, h, r) = (1.0, 0.6, 0.15);
+        for p in &poly {
+            let d = round_rect_dist(*p, w, h, r);
+            assert!(d <= 0.001 + 1e-9, "vertex {p:?} is {d} mm outside the pad");
+        }
+        // points on the pad's own outline (slightly inset) are inside the polygon
+        for i in 0..360 {
+            let (c, s) = cos_sin(i as f64);
+            let mut k = 0.0;
+            while round_rect_dist(pt(k * c, k * s), w, h, r) == 0.0 {
+                k += 0.0005;
+            }
+            let edge = pt((k - 0.001) * c, (k - 0.001) * s);
+            assert!(inside(edge, &poly), "pad copper at {edge:?} is outside the polygon");
+        }
+    }
+
+    #[test]
+    fn writes_kicad_conventions() {
+        let rules = BoardRules {
+            classes: vec![NetClass::new("Default", 0.2, 0.15, 0.6, 0.3), NetClass::new("Power", 0.3, 0.2, 0.8, 0.4).patterns(&["GND"])],
+            ..Default::default()
+        };
+        let dir = std::env::temp_dir().join(format!("pcbgen-dsn-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.dsn");
+        let vias = write(&board(), &rules, 0.25, 0, &path).unwrap();
+        let dsn = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let has = |s: &str| assert!(dsn.contains(s), "missing {s:?} in\n{dsn}");
+        // Y up, µm; the footprint's rotation on the place, pad rotation relative to it
+        has("(place U1 105000 -105000 front 90 (PN X))");
+        has("(pin RoundRect[T]Pad_1000x600_150_um (rotate 90) 1 -1000 0)");
+        has("(pin Rect[T]Pad_500x500_um 1@1 1000 0)");
+        has("(pin Rect[T]Pad_500x500_um 4 0 2000)");
+        // NPTH: a keep-out of drill + 2 × hole clearance
+        has("(keepout \"\" (circle F.Cu 1500 0 -1000))");
+        has("(pins U1-1 U1-1@1)");
+        has("(net \"unconnected-(U1-Pad4)\"\n      (pins U1-4)");
+        has("(class Power GND\n      (circuit\n        (use_via \"Via[0-1]_800:400_um\")");
+        has("(wire (path F.Cu 200  104000 -104000  104000 -103000)(net GND)(type fix))");
+        // the outline with the board's own corners, closed
+        has("(path pcb 0  100000 -100000  110000 -100000  110000 -110000  100000 -110000  100000 -100000)");
+        assert_eq!(vias[&via_name(0.8, 0.4)], (0.8, 0.4));
+        assert_eq!(vias[&via_name(0.6, 0.3)], (0.6, 0.3));
+    }
+
+    #[test]
+    fn refuses_what_it_cannot_write() {
+        let text = BOARD.replace("(pad \"1\" smd rect", "(pad \"1\" smd trapezoid");
+        let b = Board::from_sexp(&parse(&text).unwrap()).unwrap();
+        let err = write(&b, &BoardRules::default(), 0.25, 0, &std::env::temp_dir().join("never.dsn")).unwrap_err();
+        assert!(err.to_string().contains("trapezoid"), "{err}");
+    }
+}

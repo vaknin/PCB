@@ -292,6 +292,7 @@ name = "starter"
 version = "0.1.0"
 dependencies = [
  "pcbgen",
+ "serde_json",
 ]
 
 [[package]]

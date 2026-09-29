@@ -8,3 +8,6 @@ publish = false
 
 [dependencies]
 pcbgen = { path = "../../crates/pcbgen" }
+
+[dev-dependencies]
+serde_json = "1.0.151"
