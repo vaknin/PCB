@@ -3,7 +3,35 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
-## D-003 Bake-off lineup: drop atopile, add a KiCad-native lane (PROPOSED, awaiting owner)
+## D-004 Pipeline = KiCad-native; full bake-off replaced by a routing check (CONFIRMED 2026-09-29)
+- **Owner's direction:** "zero preferences, only care about quality and ease; assume Opus 5.5 can handle any tool." So tools are judged on output quality, how well the checks catch mistakes, and durability. How easy they are for an AI to use doesn't count.
+- **atopile is out, whatever the skill level.** Its problems are platform risk, not difficulty:
+  - its local tool is being retired
+  - part picking goes through a closed, login-only backend that already broke once (July 2026)
+  - it is locked to KiCad 9
+- **tscircuit is not the pipeline.** What it adds is autorouting and convenience, which only saves effort. It costs quality:
+  - its router can report success on a board that still has shorts
+  - it has no real ERC
+  - its KiCad export has pad-merging bugs
+  - it is pre-1.0, with several releases a day
+- **KiCad-native wins on quality:**
+  - KiCad is the industry-standard format.
+  - KiCad's own ERC and DRC check the real design files, using the fab's rules.
+  - Its fab outputs are accepted everywhere (JLCPCB, NextPCB, PCBWay).
+  - The owner, or any EE, can open the design in a free GUI.
+  - The pieces are maintained and don't depend on any vendor.
+- **How it works:**
+  - The circuit is written as Python code, and the generator emits a real KiCad schematic, so ERC runs on it.
+  - The choice between SKiDL and emitting the KiCad files directly is made in a Phase 1 spike. The requirement is a real `.kicad_sch` that KiCad's ERC can check.
+  - Parts are placed by code (explicit coordinates and constraints).
+  - Freerouting does the routing, run headless in Docker. Quilter's free tier and DeepPCB are the fallback routers.
+- **Tooling:** plain project scripts plus a project skill, called through Bash. An MCP server adds nothing for a single-agent CLI workflow; build one only if a real need appears.
+- **The bake-off shrinks to what is actually open:**
+  - whether Freerouting's result on the starter board is good enough
+  - whether the whole pipeline runs from code to checked fab files without the owner
+- This supersedes D-003.
+
+## D-003 Bake-off lineup: drop atopile, add a KiCad-native lane (SUPERSEDED by D-004)
 - **atopile is out.**
   - Its local CLI (0.15.9) is soft-deprecated, needs an atopile account for part picking, and only works with KiCad 9. KiCad 10 files break it (#1822).
   - Its public repo has been frozen since March. The supported 0.16 runs only in a browser with its own agent, which bypasses Claude Code, git and our gates.
