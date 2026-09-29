@@ -1,0 +1,156 @@
+# board.toml for the starter board (D-023; template: templates/board.toml).
+# Pin choices and why: the header comment of src/circuit.rs.
+
+[board]
+name = "starter"
+revision = "0"
+module = "U1"
+
+[[pin]]
+signal = "I2C_SDA"
+pin = "IO1"
+net = "I2C_SDA"
+gpio = 1
+dir = "io"
+note = "SHT40 at 0x44 and the Qwiic port; 4.7k pull-up (R7)"
+
+[[pin]]
+signal = "I2C_SCL"
+pin = "IO2"
+net = "I2C_SCL"
+gpio = 2
+dir = "out"
+note = "4.7k pull-up (R8)"
+
+[[pin]]
+signal = "STATUS_LED"
+pin = "IO48"
+net = "STATUS"
+gpio = 48
+dir = "out"
+note = "red LED D2 through 1k (R6); high = on"
+
+[[pin]]
+signal = "BOOT"
+pin = "IO0"
+net = "BOOT"
+gpio = 0
+dir = "in"
+active_low = true
+note = "BOOT button SW2, 10k pull-up (R5); strapping pin: held low at reset = download mode"
+
+[[pin]]
+signal = "UART_TX"
+pin = "TXD0"
+net = "UART_TX"
+gpio = 43
+dir = "out"
+note = "test point TP4; boot log"
+
+[[pin]]
+signal = "UART_RX"
+pin = "RXD0"
+net = "UART_RX"
+gpio = 44
+dir = "in"
+note = "test point TP5"
+
+[[pin]]
+signal = "USB_DM"
+pin = "USB_D-"
+net = "USB_D-"
+gpio = 19
+dir = "io"
+note = "native USB (flashing and serial console)"
+
+[[pin]]
+signal = "USB_DP"
+pin = "USB_D+"
+net = "USB_D+"
+gpio = 20
+dir = "io"
+note = "native USB (flashing and serial console)"
+
+[power]
+source = "USB-C 5 V (5.1k CC pull-downs: default USB power, no PD)"
+budget_ma = 500
+# 500 mA is USB 2.0's default current; that every port and charger gives at least this
+# is INFERRED. The fuse (F1) holds 0.61 A at 50 C (HARDWARE_LESSONS).
+
+[[power.load]]
+name = "ESP32-S3 module, Wi-Fi transmit peak"
+ma = 355
+source = "WROOM-1 datasheet v1.8 (HARDWARE_LESSONS.md)"
+
+[[power.load]]
+name = "Power LED D1 (5 V through 1k)"
+ma = 2
+source = "(5 V - ~3 V LED) / 1k; INFERRED from the circuit, LED voltage not measured"
+
+[[power.load]]
+name = "Status LED D2 (3.3 V through 1k)"
+ma = 1.5
+source = "(3.3 V - ~1.9 V LED) / 1k; INFERRED from the circuit"
+
+[[power.load]]
+name = "SHT40 sensor while measuring"
+ma = 0.5
+source = "INFERRED (typical for the SHT4x family; not in HARDWARE_LESSONS)"
+
+[[power.load]]
+name = "I2C pull-ups, both lines held low"
+ma = 1.4
+source = "2 x 3.3 V / 4.7k, from the circuit"
+
+[[power.load]]
+name = "LDO's own current"
+ma = 0.5
+source = "INFERRED (LDL1117 quiescent current, not checked against its datasheet)"
+
+[[power.load]]
+name = "Qwiic port allowance for plug-in boards"
+ma = 100
+source = "INFERRED: a chosen limit, not a measured load"
+
+[[requirement]]
+id = "R1"
+text = "Runs from any USB-C charger or computer port (5 V, no USB-PD)"
+covered_by = ["part:J1", "part:R1", "part:R2", "part:U2", "gate:board_toml"]
+
+[[requirement]]
+id = "R2"
+text = "Survives common USB faults: too much current, surges on 5 V, static on the data lines"
+covered_by = ["part:F1", "part:D3", "part:U3"]
+
+[[requirement]]
+id = "R3"
+text = "Flashed and talked to over the same USB-C cable, without extra hardware"
+covered_by = ["pin:USB_DM", "pin:USB_DP", "pin:BOOT", "part:SW1", "part:SW2", "test:boot_button"]
+
+[[requirement]]
+id = "R4"
+text = "Measures temperature and humidity"
+covered_by = ["part:U4", "pin:I2C_SDA", "pin:I2C_SCL", "test:sht40"]
+
+[[requirement]]
+id = "R5"
+text = "Has a Qwiic port for plug-in sensors, on the same bus as the on-board sensor"
+covered_by = ["part:J2", "pin:I2C_SDA", "pin:I2C_SCL", "test:i2c_scan"]
+
+[[requirement]]
+id = "R6"
+text = "Debug aids: power light, status light, reset and boot buttons, test points on power, UART and I2C"
+covered_by = ["part:D1", "part:D2", "pin:STATUS_LED", "pin:UART_TX", "pin:UART_RX", "part:TP1", "part:TP4", "part:TP6", "test:status_led"]
+
+[[requirement]]
+id = "R7"
+text = "Built around a pre-certified ESP32-S3 module (Wi-Fi and Bluetooth); no antenna design"
+covered_by = ["part:U1"]
+
+[[requirement]]
+id = "R8"
+text = "Fully assembled by JLCPCB with in-stock parts, passing their design rules; at least 50 x 50 mm"
+covered_by = ["gate:erc", "gate:drc", "gate:netlist", "gate:routing"]
+
+[firmware]
+self_test = ["sht40", "i2c_scan", "status_led", "boot_button"]

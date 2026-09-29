@@ -1,10 +1,13 @@
 //! Pipeline driver, called by each board's `main`:
-//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [--out DIR] [--tries N]`
+//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [--out DIR] [--tries N]`
 //!
 //! Stages run in this order whatever order they are named in (default: all). Generated
 //! KiCad files go to `<board>/kicad/` and fab files to `<board>/fab/`; `--out DIR` puts
 //! both under DIR instead (for comparison runs). `--tries N` overrides the layout's
 //! number of Freerouting footprint orders (`--tries 1` for a quick look at a placement).
+//!
+//! A board with a `board.toml` (D-023) gets the BOARD.TOML gate in `sch`, `check` and `fw`;
+//! `fw` writes the firmware's pin header to `<board>/firmware/board_pins.h`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -14,9 +17,9 @@ use anyhow::{Result, bail};
 use crate::circuit::Circuit;
 use crate::layout::Layout;
 use crate::sexpr::Sexp;
-use crate::{fab, gates, pcb, project, report, route, schematic};
+use crate::{boardfile, fab, gates, pcb, project, report, route, schematic};
 
-pub const STAGES: [&str; 5] = ["sch", "pcb", "route", "check", "fab"];
+pub const STAGES: [&str; 6] = ["sch", "pcb", "route", "check", "fab", "fw"];
 
 pub struct Board {
     /// The board's own directory (its crate).
@@ -76,13 +79,30 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
     let sch_path = out.join(format!("{name}.kicad_sch"));
     // KiCad's netlist of the schematic: exported once per run, for sch, pcb and check
     let mut net_tree: Option<Sexp> = None;
+    let board_file = boardfile::load(&board.dir)?;
+    // the BOARD.TOML gate's result: checked once per run, by the first stage that needs it
+    let mut toml_ok: Option<bool> = None;
+    let mut board_toml = |c: &Circuit| -> Result<bool> {
+        if let Some(ok) = toml_ok {
+            return Ok(ok);
+        }
+        let ok = match &board_file {
+            Some(bf) => boardfile::gate(bf, c, &board.dir)?,
+            None => {
+                println!("== BOARD.TOML: none in {} (skipped; see templates/board.toml)", board.dir.display());
+                true
+            }
+        };
+        Ok(*toml_ok.insert(ok))
+    };
 
     if want("sch") {
         project::write(&out, &name, &layout.rules)?;
         println!("schematic: {}", schematic::write(&mut circuit, &out)?.display());
         let tree = net_tree.insert(gates::export_netlist(&sch_path)?);
         let (n, c) = (gates::netlist(tree, &circuit), gates::netclasses(tree, &layout.rules));
-        if !(n && c) {
+        let b = board_toml(&circuit)?;
+        if !(n && c && b) {
             return Ok(false);
         }
     }
@@ -95,7 +115,7 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
     }
     if want("check") {
         let tree = cached(&mut net_tree, &sch_path)?;
-        let n = gates::netlist(tree, &circuit) & gates::netclasses(tree, &layout.rules);
+        let n = gates::netlist(tree, &circuit) & gates::netclasses(tree, &layout.rules) & board_toml(&circuit)?;
         let e = gates::erc(&out, &name, &layout.waivers)?;
         let d = gates::drc(&out, &name, &layout.waivers)?; // refills zones and saves the board
         let r = report::run(&out, &name, &layout.rules)?;
@@ -106,6 +126,21 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
     if want("fab") {
         // the schematic stage adds PWR_FLAG parts; fab only needs the real ones
         fab::export(&out, &name, &circuit, &base.join("fab"))?;
+    }
+    if want("fw") {
+        match &board_file {
+            None => println!("fw: no board.toml in {}; no pin header written", board.dir.display()),
+            Some(bf) => {
+                if !board_toml(&circuit)? {
+                    return Ok(false);
+                }
+                let dir = base.join("firmware");
+                std::fs::create_dir_all(&dir)?;
+                let path = dir.join("board_pins.h");
+                std::fs::write(&path, boardfile::header(bf))?;
+                println!("fw: {}", path.display());
+            }
+        }
     }
     Ok(true)
 }

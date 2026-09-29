@@ -3,6 +3,7 @@
 //! netlist export, ERC, DRC, zone fill and fab exports. No KiCad library is loaded.
 
 pub mod board;
+pub mod boardfile;
 pub mod circuit;
 pub mod cli;
 pub mod dsn;
