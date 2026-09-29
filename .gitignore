@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+tools/
+boards/*/kicad/*.kicad_prl
+boards/*/kicad/route/
+boards/*/kicad/*-backups/

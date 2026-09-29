@@ -1,0 +1,407 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-09-29T08:52:59",
+    "ignored_checks": [
+        {
+            "description": "Footprint has no courtyard defined",
+            "key": "missing_courtyard"
+        },
+        {
+            "description": "Track endpoint not centered on via",
+            "key": "track_not_centered_on_via"
+        },
+        {
+            "description": "Tuning profile track geometries",
+            "key": "tuning_profile_track_geometries"
+        },
+        {
+            "description": "Footprint doesn't match symbol's footprint filters",
+            "key": "footprint_filters_mismatch"
+        },
+        {
+            "description": "Footprint component type doesn't match footprint pads",
+            "key": "footprint_type_mismatch"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning",
+        "exclusion"
+    ],
+    "kicad_version": "10.0.6",
+    "schematic_parity": [],
+    "source": "starter.kicad_pcb",
+    "unconnected_items": [
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                },
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                },
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                },
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                },
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                },
+                {
+                    "description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0",
+                    "pos": {
+                        "x": 100.0,
+                        "y": 100.0
+                    },
+                    "uuid": "d9861828-50ed-439d-ae32-2d5837c35e3c"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        }
+    ],
+    "violations": [
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP2 on F.Silkscreen",
+                    "pos": {
+                        "x": 117.5,
+                        "y": 130.5
+                    },
+                    "uuid": "4f63d31a-3298-4509-a272-3d3886b06a48"
+                },
+                {
+                    "description": "Pad 1 [+3V3] of TP2 on F.Cu",
+                    "pos": {
+                        "x": 117.5,
+                        "y": 130.5
+                    },
+                    "uuid": "1a317272-0aba-4195-b972-0f1af0e82713"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP1 on F.Silkscreen",
+                    "pos": {
+                        "x": 114.0,
+                        "y": 130.5
+                    },
+                    "uuid": "9b88fa72-a29f-4944-96cf-e1abfb1b05d9"
+                },
+                {
+                    "description": "Pad 1 [+5V] of TP1 on F.Cu",
+                    "pos": {
+                        "x": 114.0,
+                        "y": 130.5
+                    },
+                    "uuid": "92c81691-5baf-4199-8f9f-1187eafc1cde"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP4 on F.Silkscreen",
+                    "pos": {
+                        "x": 137.5,
+                        "y": 121.0
+                    },
+                    "uuid": "013871c2-c05c-4bae-86fa-661b894b8ccb"
+                },
+                {
+                    "description": "Pad 1 [/UART_TX] of TP4 on F.Cu",
+                    "pos": {
+                        "x": 137.5,
+                        "y": 121.0
+                    },
+                    "uuid": "9270a7fa-ecd7-412a-951e-4c4808540693"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP5 on F.Silkscreen",
+                    "pos": {
+                        "x": 137.5,
+                        "y": 124.5
+                    },
+                    "uuid": "76e54de1-8d47-4b4e-99b5-0044a0507225"
+                },
+                {
+                    "description": "Pad 1 [/UART_RX] of TP5 on F.Cu",
+                    "pos": {
+                        "x": 137.5,
+                        "y": 124.5
+                    },
+                    "uuid": "4fee257b-9475-4bea-8c4b-1597568cc5a4"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP3 on F.Silkscreen",
+                    "pos": {
+                        "x": 121.0,
+                        "y": 130.5
+                    },
+                    "uuid": "06ee9e03-af66-4fcb-a3ea-a2f73b118c5e"
+                },
+                {
+                    "description": "Pad 1 [GND] of TP3 on F.Cu",
+                    "pos": {
+                        "x": 121.0,
+                        "y": 130.5
+                    },
+                    "uuid": "55d5c203-b88a-4854-86c2-2f10c9b46f63"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP6 on F.Silkscreen",
+                    "pos": {
+                        "x": 141.5,
+                        "y": 129.0
+                    },
+                    "uuid": "e6d463ef-cfb6-4c12-aa62-3b7ffd488adb"
+                },
+                {
+                    "description": "Pad 1 [/I2C_SDA] of TP6 on F.Cu",
+                    "pos": {
+                        "x": 141.5,
+                        "y": 129.0
+                    },
+                    "uuid": "fef44035-e4f6-42ee-bffd-68dfab8182e6"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP7 on F.Silkscreen",
+                    "pos": {
+                        "x": 144.5,
+                        "y": 129.0
+                    },
+                    "uuid": "565dd9c7-5418-4a0a-814e-9cc504017b33"
+                },
+                {
+                    "description": "Pad 1 [/I2C_SCL] of TP7 on F.Cu",
+                    "pos": {
+                        "x": 144.5,
+                        "y": 129.0
+                    },
+                    "uuid": "0837d402-22fb-49c9-8bfa-81df6d835dda"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by board edge",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 102.0,
+                        "y": 100.0
+                    },
+                    "uuid": "2296f413-da78-49ea-a77c-bb3c6aba5c77"
+                },
+                {
+                    "description": "Segment of U1 on F.Silkscreen",
+                    "pos": {
+                        "x": 115.8,
+                        "y": 99.85
+                    },
+                    "uuid": "3e4f6019-1004-4a8f-af54-c6967bc028e6"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_edge_clearance"
+        },
+        {
+            "description": "Silkscreen clipped by board edge",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 102.0,
+                        "y": 100.0
+                    },
+                    "uuid": "2296f413-da78-49ea-a77c-bb3c6aba5c77"
+                },
+                {
+                    "description": "Segment of U1 on F.Silkscreen",
+                    "pos": {
+                        "x": 134.2,
+                        "y": 99.85
+                    },
+                    "uuid": "33fe6276-6a00-4623-b429-ff65e4b8280c"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_edge_clearance"
+        },
+        {
+            "description": "Silkscreen clipped by board edge",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 148.0,
+                        "y": 150.0
+                    },
+                    "uuid": "bfa22249-6ace-4e67-ac50-9445d4ad9e80"
+                },
+                {
+                    "description": "Segment of J1 on F.Silkscreen",
+                    "pos": {
+                        "x": 120.3,
+                        "y": 148.3
+                    },
+                    "uuid": "49ac7e10-191a-49b1-9d77-c0cf3dde6466"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_edge_clearance"
+        },
+        {
+            "description": "Silkscreen clipped by board edge",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 148.0,
+                        "y": 150.0
+                    },
+                    "uuid": "bfa22249-6ace-4e67-ac50-9445d4ad9e80"
+                },
+                {
+                    "description": "Segment of J1 on F.Silkscreen",
+                    "pos": {
+                        "x": 129.7,
+                        "y": 148.3
+                    },
+                    "uuid": "ce43ca98-f8d3-4d25-95c9-af036b00c40f"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_edge_clearance"
+        }
+    ]
+}
