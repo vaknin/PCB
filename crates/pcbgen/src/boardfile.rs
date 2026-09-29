@@ -8,12 +8,14 @@
 //! [[power.load]]   name = "ESP32-S3 Wi-Fi TX peak"; ma = 355; source = "WROOM-1 datasheet"
 //! [[requirement]]  id = "R1"; text = "..."; covered_by = ["part:J1", "pin:I2C_SDA", "test:sht40", "gate:drc"]
 //! [firmware]       self_test = ["sht40"]
+//! [[sim.wokwi_step]] wait = "SELFTEST_PRESS boot_button"; press = "BOOT"
+//! [provision]      gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
 //! ```
 //!
 //! `gate` checks it against the circuit and the board's `spec.md`; `header` turns it into
 //! the firmware's `board_pins.h`. Unknown keys are errors, so a typo can't pass silently.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -39,6 +41,54 @@ pub struct BoardFile {
     pub firmware: Firmware,
     #[serde(default)]
     pub order: Order,
+    #[serde(default)]
+    pub sim: Sim,
+    /// NVS key -> where `devctl provision` gets its value: `file:<path>#<field>` (a
+    /// `field = value` line in that file) or `prompt`. Only references; values never enter
+    /// the repo (D-025).
+    #[serde(default)]
+    pub provision: BTreeMap<String, String>,
+}
+
+/// Simulation settings (D-025). QEMU needs none; Wokwi needs the parts on the pins (`PinMap::sim`)
+/// and the steps that drive them during the self-test run.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sim {
+    #[serde(rename = "wokwi_step", default)]
+    pub wokwi_steps: Vec<WokwiStep>,
+}
+
+/// One step of the Wokwi self-test run: wait for a console line, then press a button or check
+/// a pin. The run always ends by waiting for `SELFTEST_DONE`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WokwiStep {
+    /// Console text to wait for first.
+    pub wait: String,
+    /// Press the button on this signal (its pin has `sim = "button"`)...
+    pub press: Option<String>,
+    /// ...for this long (200 ms if not given; 1000 or more is a hold).
+    pub hold_ms: Option<u64>,
+    /// ...or check this signal's pin (a LED) is at `level`.
+    pub expect: Option<String>,
+    pub level: Option<u8>,
+}
+
+/// The Wokwi part that stands in for a pin in simulation (D-025).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SimPart {
+    /// Pushbutton to GND with a 10k pull-up (active low).
+    Button,
+    /// LED from the pin through 1k to GND (active high).
+    Led,
+    /// One cathode of a common-anode RGB LED on 3V3 (active low).
+    LedR,
+    LedG,
+    LedB,
+    /// Potentiometer wiper (an analog input such as a battery divider).
+    Pot,
 }
 
 /// How the board would be ordered (D-021 option A: its own JLCPCB order in a shared parcel).
@@ -95,6 +145,8 @@ pub struct PinMap {
     pub active_low: bool,
     #[serde(default)]
     pub note: String,
+    /// The Wokwi part standing in for this pin, if any.
+    pub sim: Option<SimPart>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -330,6 +382,17 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
             p.push(format!("firmware.self_test {t:?} covers no requirement"));
         }
     }
+    p.extend(sim_problems(bf));
+    let key = Regex::new(r"^[a-z0-9_]{1,15}$").unwrap();
+    for (k, v) in &bf.provision {
+        if !key.is_match(k) {
+            p.push(format!("provision key {k:?}: NVS keys are [a-z0-9_], at most 15 characters"));
+        }
+        let ok = v == "prompt" || v.strip_prefix("file:").and_then(|f| f.split_once('#')).is_some_and(|(f, field)| !f.is_empty() && !field.is_empty());
+        if !ok {
+            p.push(format!("provision {k}: {v:?} must be \"prompt\" or \"file:<path>#<field>\""));
+        }
+    }
     match spec_ids {
         None => p.push("the board has no spec.md (copy templates/spec.md)".into()),
         Some(spec) => {
@@ -339,6 +402,55 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
             for id in ids.difference(spec) {
                 p.push(format!("board.toml requirement {id} is not in spec.md"));
             }
+        }
+    }
+    p
+}
+
+fn sim_problems(bf: &BoardFile) -> Vec<String> {
+    let mut p = vec![];
+    let mut seen = HashSet::new();
+    for pin in &bf.pins {
+        let Some(part) = pin.sim else { continue };
+        let at = format!("pin {} sim {part:?}", pin.signal);
+        let want_in = matches!(part, SimPart::Button | SimPart::Pot);
+        if want_in && pin.dir == Dir::Out || !want_in && pin.dir == Dir::In {
+            p.push(format!("{at}: doesn't fit dir {:?}", pin.dir.as_str()));
+        }
+        if matches!(part, SimPart::LedR | SimPart::LedG | SimPart::LedB) && !seen.insert(part) {
+            p.push(format!("{at}: the RGB LED has one {part:?}"));
+        }
+        if matches!(pin.gpio, 19 | 20 | 43 | 44) {
+            p.push(format!("{at}: GPIO {} is USB or the UART console", pin.gpio));
+        }
+    }
+    let part_of = |sig: &str| bf.pins.iter().find(|x| x.signal == sig).and_then(|x| x.sim);
+    for (i, st) in bf.sim.wokwi_steps.iter().enumerate() {
+        let at = format!("sim.wokwi_step {}", i + 1);
+        if st.wait.trim().is_empty() {
+            p.push(format!("{at}: wait is empty"));
+        }
+        match (&st.press, &st.expect) {
+            (Some(sig), None) => {
+                if part_of(sig) != Some(SimPart::Button) {
+                    p.push(format!("{at}: press {sig:?} needs a pin with sim = \"button\""));
+                }
+                if st.level.is_some() {
+                    p.push(format!("{at}: level goes with expect, not press"));
+                }
+            }
+            (None, Some(sig)) => {
+                if !matches!(part_of(sig), Some(SimPart::Led | SimPart::LedR | SimPart::LedG | SimPart::LedB)) {
+                    p.push(format!("{at}: expect {sig:?} needs a pin with a LED sim part"));
+                }
+                if !matches!(st.level, Some(0 | 1)) {
+                    p.push(format!("{at}: expect needs level = 0 or 1"));
+                }
+                if st.hold_ms.is_some() {
+                    p.push(format!("{at}: hold_ms goes with press, not expect"));
+                }
+            }
+            _ => p.push(format!("{at}: needs exactly one of press or expect")),
         }
     }
     p
@@ -487,6 +599,40 @@ self_test = ["sensor"]
         assert!(bf.pins[1].active_low && !bf.pins[0].active_low);
         assert_eq!(bf.power.loads[0].ma, 355.0);
         assert_eq!(run(SAMPLE, &circuit()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn sim_parts_and_wokwi_steps() {
+        let button = "active_low = true\nsim = \"button\"\n";
+        let steps = "[[sim.wokwi_step]]\nwait = \"SELFTEST_PRESS\"\npress = \"BOOT\"\nhold_ms = 1200\n";
+        let ok = SAMPLE.replacen("active_low = true\n", button, 1) + steps;
+        assert_eq!(run(&ok, &circuit()), Vec::<String>::new());
+        let bf = parse(&ok).unwrap();
+        assert_eq!(bf.pins[1].sim, Some(SimPart::Button));
+        assert_eq!(bf.sim.wokwi_steps[0].hold_ms, Some(1200));
+        assert!(parse(&SAMPLE.replacen("active_low = true\n", "sim = \"buzzer\"\n", 1)).is_err());
+
+        let bad = |from: &str, to: &str, want: &str| {
+            let p = run(&ok.replacen(from, to, 1), &circuit());
+            assert!(p.iter().any(|x| x.contains(want)), "{from:?} -> {to:?}: want {want:?}, got {p:?}");
+        };
+        bad("sim = \"button\"", "sim = \"led\"", "doesn't fit dir");
+        bad("press = \"BOOT\"", "press = \"I2C_SDA\"", "needs a pin with sim = \"button\"");
+        bad("press = \"BOOT\"\nhold_ms = 1200", "expect = \"BOOT\"\nlevel = 1", "needs a pin with a LED sim part");
+        bad("press = \"BOOT\"", "press = \"BOOT\"\nexpect = \"BOOT\"", "exactly one of press or expect");
+        bad("wait = \"SELFTEST_PRESS\"", "wait = \" \"", "wait is empty");
+        // a sim part on the USB pin
+        bad("gpio = 20\ndir = \"io\"", "gpio = 20\ndir = \"io\"\nsim = \"led\"", "USB or the UART console");
+    }
+
+    #[test]
+    fn provision_references() {
+        let with = |v: &str| run(&format!("{SAMPLE}\n[provision]\n{v}\n"), &circuit());
+        assert_eq!(with("gemini_api_key = \"file:~/.config/capture-notes/config#gemini_api_key\""), Vec::<String>::new());
+        assert_eq!(with("wifi_pass = \"prompt\""), Vec::<String>::new());
+        assert!(with("wifi_pass = \"hunter2\"")[0].contains("must be \"prompt\""));
+        assert!(with("file = \"file:x\"")[0].contains("file:<path>#<field>"));
+        assert!(with("a_key_that_is_too_long = \"prompt\"")[0].contains("at most 15"));
     }
 
     #[test]
