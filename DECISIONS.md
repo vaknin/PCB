@@ -3,6 +3,22 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-025 Plan: shared firmware and enclosure tooling (proven on the starter), then capture-clip (PROPOSED, waiting for the owner, 2026-09-29)
+- **Owner's words (relayed by session pcb-df):** "plan everything, including enclosure, firmware, etc."
+- **The plan:** `docs/plan.md`. Phases: A shared firmware base (`firmware/components/`, template, `sim` stage, `devctl` bring-up tool); B enclosure tooling (`case` stage, CadQuery template, fit gate); C workflow changes (the case moves into the design rounds; battery and sleep budgets in `board.toml`); D capture-clip firmware in simulation; E its circuit, layout and case in rounds; F order, bring-up, next revision.
+- **Research:** `research/2026-09-29-wokwi.md`, `research/2026-09-29-esp32-firmware.md`, `research/2026-09-29-enclosure-tooling.md`.
+- **Technical choices in it (Claude's, final once the plan is agreed):**
+  - **Simulation:** Wokwi, with sim-only firmware switches for audio (a WAV in flash) and sleep (a loop), because the S3's I2S and deep sleep aren't simulated. Real secrets never go into Wokwi (its internet gateway is public and monitored). The Capture protocol code is unit-tested on the laptop instead.
+  - **Enclosure CAD:** CadQuery 2.8.0 in a project uv venv. OpenSCAD has no release after 2021.01 and can't read STEP; build123d is pre-1.0. Python because OpenCascade, the only mature open CAD kernel, is reached from it.
+  - **3D models:** fetched one by one (KiCad GitLab tag 10.0.6, plus easyeda2kicad for USB-C, the RGB LED and JST PH) into `lib/3dmodels/`. `kicad-library-3d` (D-001's deferral) is not installed.
+  - **Audio:** OGG/Opus 16 kHz mono 32 kbps via `esp_audio_codec` 2.6.2 + `esp_muxer` 1.2.3 (closed, Espressif-only licence; test build on v6.1 first). Fallback AAC-ADTS or our own Ogg writer.
+  - **Storage:** LittleFS, one file per recording, fsync about every second; 16 MB partition table with two 3 MB OTA slots and ~9.8 MiB of storage (~37 min).
+  - **Secrets:** HMAC-eFuse NVS encryption, no flash encryption, no secure boot, so USB re-flashing stays normal.
+  - **Provisioning:** a generic `devctl provision` reading `board.toml [provision]` references, instead of the `capture-notes` subcommand D-024 mentioned.
+  - **OTA:** USB only for Rev A; two slots and rollback kept so a network update needs no partition change.
+  - **Circuit consequences for capture-clip:** mic powered straight from a GPIO (no P-FET), battery divider 3:1, a VBUS-sense divider, a 10 kΩ pull-up on GPIO0, CHRG through ~100 kΩ, brown-out 2.84 V, no upload below 3.45 V and no recording below 3.3 V, and a hold with no last note makes a new note.
+- **Not verified yet:** assembled boards and 3D prints in one JLC parcel (ask JLC before the first order); the Espressif codec on v6.1; HTTPS from Wokwi to Gemini and GitHub.
+
 ## D-024 First project: capture-clip, a battery voice-note button for Capture (DECIDED, brainstorm closed by the owner, 2026-09-29)
 - **Owner's words:** "let's add another user: ESP32, which will be able to capture voice ideas after pressing a button"; then "Build B, add an LED indicator light … I don't want it ordered yet, but maybe some day when I have a few more projects ready to be ordered with it … battery … use it around the house, maybe take it with me … one button suffices … make difference between press and hold, so we can have two functions for it".
 - **Spec:** `boards/capture-clip/spec.md` (R1–R11). The recording length wasn't answered, so it defaults to Capture's own 15-minute cap.
