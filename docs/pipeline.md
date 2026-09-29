@@ -10,9 +10,9 @@ Why this shape: `DECISIONS.md` D-004, D-005, D-010 and D-016 (the Rust port, no 
 
 ## Run
 ```
-cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [cost] [review] [--out DIR] [--tries N]
+cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [cost] [review] [--out DIR] [--tries N] [--wokwi]
 ```
-With no stage named, `sch` to `fw` run in order; `cost` (network) and `review` run only when named. `--out DIR` writes `DIR/kicad`, `DIR/fab`, `DIR/firmware` and `DIR/review` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each); checking the best 3 adds ~10 s.
+With no stage named, `sch` to `fw` run in order; `sim`, `cost` (network) and `review` run only when named. `--out DIR` writes `DIR/kicad`, `DIR/fab`, `DIR/firmware` and `DIR/review` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each); checking the best 3 adds ~10 s.
 
 | Stage | Does | Output |
 |---|---|---|
@@ -21,12 +21,14 @@ With no stage named, `sch` to `fw` run in order; `cost` (network) and `review` r
 | route | deletes old unlocked tracks → DSN written by pcbgen (pours hidden from the router) → Freerouting on 8 footprint orders, 4 at a time, fanout off; ranked by fewest unrouted, then least track under class width, fewest vias, shortest → the best 3 are each finished (SES tracks, kicad-cli zone fill, stitching vias for GND and `stitch_local` nets, fill) and DRC-checked in `route/try-<n>/check/`; the best-ranked one with no open DRC item is kept (D-019). If none is clean it escalates, cheapest first: checks the other routed orders, then routes `extra_rounds` × `extra_tries` new orders (default 1 × 8) and checks them. If still none is clean it keeps the one with the fewest open items and writes the failure report (D-020) | same file; the winner's work files in `kicad/route/`, each order's in `route/try-<n>/`, scores and steps in `route/tries.json`; on failure `route/failure.json` and a line per failed order in `<board>/route-failures.jsonl` |
 | check | netlist round trip, net-class patterns, BOARD.TOML, ERC, DRC (JLCPCB rules, schematic parity), routing report; fails on any error, unwaived warning, unrouted connection or copper in a keep-out | `kicad/reports/{erc,drc,routing,gates}.json` |
 | fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections (bottom side: 180 − angle, as kicad-jlcpcb-tools); lists parts whose rotation is UNVERIFIED, and every bottom-side part | `fab/` (see `fab/README.md`) |
-| fw | the BOARD.TOML gate, then the ESP-IDF pin header from `board.toml` (a board without one is skipped) | `firmware/board_pins.h` |
+| fw | the BOARD.TOML gate, then the ESP-IDF pin header from `board.toml` (a board without one is skipped); the first time, copies `templates/firmware` into `firmware/`; when a pin has a `sim` part, the Wokwi files | `firmware/board_pins.h`, `firmware/{diagram.json,wokwi.toml,wokwi-selftest.yaml}` |
+| sim | the firmware in Espressif's QEMU (free, unlimited): boot banner, the self-tests, a provisioning round trip; with `--wokwi` also the pin checks in Wokwi (quota: 50 simulated min/month, logged in `~/.config/wokwi/usage.jsonl`) | `firmware/sim.json`, logs in `firmware/build-{qemu,wokwi}/` |
 | cost | prices the BOM line by line from JLCPCB's parts API (live; minimums, attrition, Extended fees), plus PCB, setup, stencil and joints, for `[order]` (default 5 bare, 2 assembled); shipping and VAT apart, since they are per parcel (D-021, D-023) | `fab/cost.json` |
 | review | the owner's review page from what the other stages wrote: renders, round and changes since the last draft tag, things to check, requirement coverage, cost against budget, power, checks (D-023) | `review/index.html` (gitignored) |
 
 `scripts/render.sh boards/<name> [out.png] [layers]` renders the top side to look at (`B.Cu,B.Fab,B.Courtyard,B.SilkS,Edge.Cuts` for the back).
 `scripts/draft.sh <board>`, `scripts/freeze.sh <board>` and `scripts/check-frozen.sh <board>` tag design rounds, freeze a revision, and check before an order that nothing changed since the freeze (D-023, `docs/workflow.md`).
+`scripts/fw-test.sh [--gcc]` runs the firmware's laptop tests (see Firmware below).
 `scripts/fr-violations/run.sh <board.dsn>` lists the clearance violations Freerouting counts, with the items involved (D-018).
 
 ## When routing fails (D-020)
@@ -62,8 +64,15 @@ With no stage named, `sch` to `fw` run in order; `cost` (network) and `review` r
   - `route`: Freerouting and stitching options (`RouteOptions`: `tries`, `parallel`, `fanout`, `drc_checks`, `extra_rounds`, `extra_tries`, `pad_rings`, stitching).
   - `waivers`: `Waiver { kind, substring, reason }` entries.
 - `board.toml`, `spec.md` (from `templates/`): pin map, power budget, requirements; see `docs/workflow.md` step 2. `round.md`: Claude's notes for the current design round, shown on the review page. `errata-rev<X>.md` after bring-up.
-- Generated: `kicad/`, `fab/` and `firmware/board_pins.h` (committed); `review/` (not committed). Firmware source goes in `firmware/` too, once written.
+- Generated: `kicad/`, `fab/`, `firmware/board_pins.h`, the Wokwi files and `firmware/sim.json` (committed); `review/` and `firmware/build*/` (not committed). The board's firmware source is `firmware/main/`.
 - Modified footprints go in `lib/footprints/<Lib>.pretty` (repo root); the `sch` stage points the project's fp-lib-table there for any library of that name. Currently `pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3` (D-015).
+
+## Firmware (D-025)
+Each board's firmware is an ESP-IDF project in `boards/<name>/firmware/` using the shared components in `firmware/components/` (`board`: boot banner, NVS, marking an update good; `selftest`; `provision`; `sensirion`). Kconfig `BOARD_TARGET` = REAL, QEMU or WOKWI; the sim builds add `sdkconfig.qemu` / `sdkconfig.wokwi` in their own build directories. Tested in four layers, open source first:
+1. **Laptop** (`scripts/fw-test.sh`, unlimited): gcc tests `firmware/test/test_*.c` and `boards/*/firmware/test/test_*.c`, each naming its sources on line 1 (`// SOURCES: ...`), runner `firmware/test/unit.h`, stubs in `firmware/test/stubs/`, ASan + UBSan. Code needing NVS or FreeRTOS: the ESP-IDF linux-target app `firmware/test/linux`. Keep hardware out of logic files so they can be tested here.
+2. **QEMU** (`sim`): the whole image, 16 MB flash + 8 MB octal PSRAM; no GPIO, I2C, I2S, USB, Wi-Fi or deep sleep, so tests needing them report `skip`.
+3. **Wokwi** (`sim --wokwi`): pins only. `board.toml` `[[pin]] sim = "button" | "led" | "led_r/g/b" | "pot"` puts a part on the pin; `[[sim.wokwi_step]]` `wait` for a console line, then `press` a button signal (`hold_ms`) or `expect` a signal at `level`. The run ends at `SELFTEST_DONE`. Firmware prints each report only after the button is released (HARDWARE_LESSONS). No real secret ever goes into Wokwi.
+4. **Hardware** with `devctl` (`crates/devctl`): `cargo run --release -p devctl -- <flash|selftest|provision|monitor> <board> [--port P] [--qemu]`. `flash` refuses any build whose `sdkconfig.json` isn't `BOARD_TARGET_REAL` and any chip that isn't an ESP32-S3 with 16 MB, then checks the boot banner against `board.toml`. `selftest` writes `bringup/selftest-<date>.json`. `provision` sends `board.toml [provision]` values (`file:<path>#<field>` from a `key=value` file, or `prompt`) only after the banner matches, and never prints them. `--qemu` runs the same against the QEMU image (results stay in `firmware/build-qemu/`).
 
 ## Status (2026-09-29, starter board)
 - **All gates pass on a clean end-to-end run of the Rust pipeline:** netlist round trip, ERC 0, DRC 0 open (11 waived cosmetic silk warnings), routing 0 unrouted and no copper in keep-outs.
@@ -75,5 +84,5 @@ With no stage named, `sch` to `fw` run in order; `cost` (network) and `review` r
 
 ## Next session
 1. Read `HARDWARE_LESSONS.md`, `DECISIONS.md` (open questions at the end), this file and `docs/workflow.md` (how a project runs, D-022).
-2. **Next:** brainstorm the first real project with the owner (`docs/workflow.md` step 1), then its spec.
+2. **Next:** `docs/plan.md` (D-025): Phase A (firmware tooling) is done; Phase B, the enclosure tooling, is next.
 3. Deferred items before any real order are listed under "Open questions" in `DECISIONS.md`.

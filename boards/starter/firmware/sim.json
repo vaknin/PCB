@@ -7,7 +7,7 @@
       "name": "starter",
       "rev": "0",
       "target": "qemu",
-      "fw": "9d9f2b7-dirty",
+      "fw": "0c1cbb3-dirty",
       "slot": "ota_0",
       "psram": 8388608,
       "nvs": true

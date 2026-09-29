@@ -21,6 +21,7 @@ net = "STATUS"
 gpio = 48
 dir = "out"
 active_low = false     # optional; true adds PIN_<signal>_ACTIVE_LOW to the header
+sim = "led"            # optional: the Wokwi part on this pin (button, led, led_r, led_g, led_b, pot)
 note = ""              # optional; copied into the header comment
 
 [power]
@@ -47,3 +48,18 @@ covered_by = ["part:D2", "pin:STATUS_LED", "test:status_led"]
 [firmware]
 # Self-tests the firmware runs at bring-up and reports over USB; each must cover a requirement.
 self_test = ["status_led"]
+
+# Wokwi pin checks (`sim --wokwi`; optional). Each step waits for a console line, then presses
+# a button signal (hold_ms, default 200; 1000+ is a hold) or checks a signal is at `level`.
+# The run then waits for SELFTEST_DONE. Print a report only after a button is released.
+[[sim.wokwi_step]]
+wait = "SELFTEST_LOOK status_led on"
+expect = "STATUS_LED"
+level = 1
+
+# Values `devctl provision` writes into the board's NVS (optional). Only references go here,
+# never values: "file:<path>#<field>" (a key=value line in that file) or "prompt".
+# Keys: [a-z0-9_], at most 15 characters.
+# [provision]
+# wifi_ssid = "prompt"
+# gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"

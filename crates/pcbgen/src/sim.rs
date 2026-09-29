@@ -31,8 +31,8 @@ use crate::boardfile::BoardFile;
 use crate::wokwi;
 
 /// ESP32-S3-WROOM-1-N16R8 (the only module pcbgen has a GPIO table for).
-const FLASH: &str = "16MB";
-const PSRAM_BYTES: u64 = 8 << 20;
+pub const FLASH: &str = "16MB";
+pub const PSRAM_BYTES: u64 = 8 << 20;
 /// How long the whole QEMU run may take (wall clock); a boot takes a few seconds.
 const QEMU_TIMEOUT: Duration = Duration::from_secs(90);
 /// Simulated time a Wokwi run may take. A run that times out is billed all of it, so keep it
@@ -104,7 +104,8 @@ fn print_summary(what: &str, r: &Value) {
     }
 }
 
-fn idf_path() -> Result<PathBuf> {
+/// ESP-IDF: `$IDF_PATH`, else `~/esp/esp-idf-v6.1`.
+pub fn idf_path() -> Result<PathBuf> {
     let p = match std::env::var_os("IDF_PATH") {
         Some(p) => PathBuf::from(p),
         None => PathBuf::from(std::env::var("HOME")?).join("esp/esp-idf-v6.1"),
@@ -116,7 +117,7 @@ fn idf_path() -> Result<PathBuf> {
 }
 
 /// Runs `script` in a bash with ESP-IDF's environment, in `dir`, with its output in `log`.
-fn idf_shell(idf: &Path, dir: &Path, script: &str, log: &Path) -> Result<()> {
+pub fn idf_shell(idf: &Path, dir: &Path, script: &str, log: &Path) -> Result<()> {
     let full = format!(". '{}/export.sh' >/dev/null 2>&1 && {script}", idf.display());
     let out = Command::new("bash").arg("-c").arg(&full).current_dir(dir).env("PCB_ROOT", crate::repo_root()).output()?;
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -169,7 +170,8 @@ fn flash_image(build: &Path, idf: &Path) -> Result<PathBuf> {
     Ok(image)
 }
 
-fn qemu_binary() -> Result<PathBuf> {
+/// Espressif's `qemu-system-xtensa`, the newest installed under `$IDF_TOOLS_PATH` (`~/.espressif`).
+pub fn qemu_binary() -> Result<PathBuf> {
     let tools = match std::env::var_os("IDF_TOOLS_PATH") {
         Some(p) => PathBuf::from(p),
         None => PathBuf::from(std::env::var("HOME")?).join(".espressif"),
@@ -186,16 +188,18 @@ fn qemu_binary() -> Result<PathBuf> {
 }
 
 /// A running QEMU: its console lines arrive on a channel, so every wait has a deadline.
-struct Console {
+/// `log` holds every line read and the shown form of every line sent.
+pub struct Console {
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<String>,
-    log: Vec<String>,
+    pub log: Vec<String>,
     deadline: Instant,
 }
 
 impl Console {
-    fn start(qemu: &Path, image: &Path) -> Result<Console> {
+    /// Boots `image` (a whole 16 MB flash) with the module's octal PSRAM.
+    pub fn start(qemu: &Path, image: &Path) -> Result<Console> {
         let mut child = Command::new(qemu)
             .args(["-M", "esp32s3", "-m", &format!("{}M", PSRAM_BYTES >> 20)])
             .arg("-drive")
@@ -221,13 +225,24 @@ impl Console {
         Ok(Console { child, stdin, lines: rx, log: vec![], deadline: Instant::now() + QEMU_TIMEOUT })
     }
 
+    /// The next console line, or None if none comes within `timeout`; an error once QEMU exited.
+    pub fn next_line(&mut self, timeout: Duration) -> Result<Option<String>> {
+        match self.lines.recv_timeout(timeout) {
+            Ok(l) => {
+                self.log.push(l.clone());
+                Ok(Some(l))
+            }
+            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Disconnected) => bail!("QEMU exited"),
+        }
+    }
+
     /// Waits for a line starting with `prefix`; returns the rest of it.
     fn expect(&mut self, prefix: &str) -> Result<String> {
         loop {
             let left = self.deadline.saturating_duration_since(Instant::now());
-            match self.lines.recv_timeout(left) {
-                Ok(l) => {
-                    self.log.push(l.clone());
+            match self.next_line(left) {
+                Ok(Some(l)) => {
                     if let Some(rest) = l.strip_prefix(prefix) {
                         return Ok(rest.trim().to_string());
                     }
@@ -236,15 +251,21 @@ impl Console {
                         bail!("the firmware crashed or reset while waiting for `{prefix}`: {l}");
                     }
                 }
-                Err(RecvTimeoutError::Timeout) => bail!("timed out waiting for `{prefix}`"),
-                Err(RecvTimeoutError::Disconnected) => bail!("QEMU exited while waiting for `{prefix}` (see the log)"),
+                Ok(None) => bail!("timed out waiting for `{prefix}`"),
+                Err(_) => bail!("QEMU exited while waiting for `{prefix}` (see the log)"),
             }
         }
     }
 
-    fn send(&mut self, line: &str) -> Result<()> {
-        self.log.push(format!(">> {line}"));
-        writeln!(self.stdin, "{line}")?;
+    pub fn send(&mut self, line: &str) -> Result<()> {
+        self.send_redacted(line, line)
+    }
+
+    /// Sends `line` but logs only `shown` (a line carrying a secret never enters `log`).
+    pub fn send_redacted(&mut self, line: &str, shown: &str) -> Result<()> {
+        self.log.push(format!(">> {shown}"));
+        self.stdin.write_all(line.as_bytes())?;
+        self.stdin.write_all(b"\n")?;
         Ok(self.stdin.flush()?)
     }
 }
@@ -268,13 +289,11 @@ fn qemu_run(bf: &BoardFile, fw: &Path, idf: &Path) -> Result<Value> {
     Ok(r)
 }
 
-/// The boot banner and self-test report in a console log, checked against `board.toml`:
-/// `(banner, tests, summary, problems)`. Tests may pass or skip; a failing or missing one, or
-/// a banner that doesn't match the board and target, is a problem.
-fn report(bf: &BoardFile, log: &[String], target: &str) -> (Value, Vec<Value>, Value, Vec<String>) {
+/// The first `BOARD {...}` banner in a console log, checked against `board.toml` and `target`
+/// (name, rev, target, 8 MiB PSRAM, NVS up): the banner (Null if missing) and its problems.
+pub fn banner(bf: &BoardFile, log: &[String], target: &str) -> (Value, Vec<String>) {
     let mut problems: Vec<String> = vec![];
-    let after = |prefix: &str| log.iter().find_map(|l| l.strip_prefix(prefix)).map(str::trim);
-    let banner: Value = match after("BOARD ").map(serde_json::from_str) {
+    let banner: Value = match log.iter().find_map(|l| l.strip_prefix("BOARD ")).map(|b| serde_json::from_str(b.trim())) {
         Some(Ok(v)) => v,
         Some(Err(_)) => {
             problems.push("BOARD banner is not JSON".into());
@@ -297,6 +316,15 @@ fn report(bf: &BoardFile, log: &[String], target: &str) -> (Value, Vec<Value>, V
             problems.push(format!("banner {k} is {}, expected {v}", banner[k]));
         }
     }
+    (banner, problems)
+}
+
+/// The boot banner and self-test report in a console log, checked against `board.toml`:
+/// `(banner, tests, summary, problems)`. Tests may pass or skip; a failing or missing one, or
+/// a banner that doesn't match the board and target, is a problem.
+pub fn report(bf: &BoardFile, log: &[String], target: &str) -> (Value, Vec<Value>, Value, Vec<String>) {
+    let (banner, mut problems) = banner(bf, log, target);
+    let after = |prefix: &str| log.iter().find_map(|l| l.strip_prefix(prefix)).map(str::trim);
 
     let tests: Vec<Value> = log
         .iter()
