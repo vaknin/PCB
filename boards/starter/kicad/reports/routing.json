@@ -1,49 +1,56 @@
 {
   "unrouted_connections": 0,
-  "track_segments": 257,
+  "track_segments": 277,
   "track_length_mm": {
-    "B.Cu": 155.5,
-    "F.Cu": 512.8
+    "B.Cu": 251.4,
+    "F.Cu": 420.3
   },
-  "vias_total": 94,
-  "vias_gnd": 54,
-  "vias_signal": 40,
+  "vias_total": 113,
+  "vias_gnd": 65,
+  "vias_signal": 48,
   "vias_by_net": {
     "+3V3": 22,
+    "+5V": 3,
     "/BOOT": 2,
-    "/EN": 2,
-    "/I2C_SDA": 2,
+    "/EN": 3,
+    "/I2C_SDA": 4,
+    "/PWR_LED": 2,
     "/UART_RX": 2,
     "/UART_TX": 2,
     "/USB_D+": 3,
     "/USB_D-": 2,
-    "GND": 54,
+    "GND": 65,
     "VBUS": 3
   },
   "copper_in_keepouts": [],
   "thinner_than_class_mm": {
-    "+3V3": 0.8,
-    "GND": 0.8
+    "+3V3": 5.3,
+    "/I2C_SCL": 2.6,
+    "/I2C_SDA": 5.5,
+    "/UART_RX": 1.2,
+    "/UART_TX": 3.0,
+    "/USB_D-": 1.2,
+    "GND": 27.1
   },
   "pours": {
-    "GND F.Cu": {
-      "pieces": 4,
-      "filled_pct": 57.2,
-      "largest_piece_pct_of_fill": 46.4
-    },
     "+3V3 F.Cu": {
       "pieces": 1,
-      "filled_pct": 93.7,
+      "filled_pct": 94.9,
+      "largest_piece_pct_of_fill": 100.0
+    },
+    "GND F.Cu": {
+      "pieces": 2,
+      "filled_pct": 60.7,
+      "largest_piece_pct_of_fill": 81.3
+    },
+    "GND B.Cu": {
+      "pieces": 1,
+      "filled_pct": 69.5,
       "largest_piece_pct_of_fill": 100.0
     },
     "+3V3 B.Cu": {
       "pieces": 1,
-      "filled_pct": 98.8,
-      "largest_piece_pct_of_fill": 100.0
-    },
-    "GND B.Cu": {
-      "pieces": 1,
-      "filled_pct": 72.6,
+      "filled_pct": 100.0,
       "largest_piece_pct_of_fill": 100.0
     }
   }

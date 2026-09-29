@@ -16,6 +16,7 @@ pub mod project;
 pub mod report;
 pub mod route;
 pub mod schematic;
+pub mod ses;
 pub mod sexpr;
 pub mod stitch;
 pub mod symlib;

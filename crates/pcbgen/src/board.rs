@@ -87,6 +87,7 @@ pub struct RuleArea {
 #[derive(Clone, Debug)]
 pub struct Footprint {
     pub reference: String,
+    pub value: String,
     pub lib_id: String,
     pub pos: Pt,
     pub rot: f64,
@@ -137,6 +138,8 @@ pub struct Board {
     pub keepouts: Vec<RuleArea>,
     /// Board outline (Edge.Cuts) as one closed polygon.
     pub outline: Vec<Pt>,
+    /// Widest Edge.Cuts stroke, mm.
+    pub edge_width: f64,
 }
 
 pub fn xy(n: Option<&Sexp>) -> Pt {
@@ -254,12 +257,10 @@ impl Footprint {
         let pos = xy(at);
         let rot = at.map_or(0.0, |a| a.num(3));
         let to_abs = |p: Pt| pos + rotate(p, rot);
-        let reference = n
-            .find_all("property")
-            .find(|p| p.arg(1) == Some("Reference"))
-            .and_then(|p| p.arg(2))
-            .unwrap_or("")
-            .to_string();
+        let prop = |key: &str| {
+            n.find_all("property").find(|p| p.arg(1) == Some(key)).and_then(|p| p.arg(2)).unwrap_or("").to_string()
+        };
+        let reference = prop("Reference");
         let mut pads = vec![];
         for p in n.find_all("pad") {
             let pat = p.find("at");
@@ -298,6 +299,7 @@ impl Footprint {
         let keepouts = n.find_all("zone").filter_map(|z| rule_area(z, pts(z.find("polygon").and_then(|p| p.find("pts"))))).collect();
         Ok(Footprint {
             reference,
+            value: prop("Value"),
             lib_id: n.arg(1).unwrap_or("").to_string(),
             pos,
             rot,
@@ -362,7 +364,21 @@ impl Board {
         }
         let edges = shapes_on(root, "gr_", "Edge.Cuts", &|p| p);
         let outline = edges.into_iter().max_by(|a, b| crate::geom::area(a).total_cmp(&crate::geom::area(b))).unwrap_or_default();
-        Ok(Board { footprints, segments, vias, zones, keepouts, outline })
+        let edge_width = root
+            .items()
+            .iter()
+            .filter(|g| g.head().is_some_and(|h| h.starts_with("gr_")) && g.get("layer") == Some("Edge.Cuts"))
+            .map(|g| g.find("stroke").and_then(|s| s.find("width")).map_or(0.0, |w| w.num(1)))
+            .fold(0.0, f64::max);
+        Ok(Board { footprints, segments, vias, zones, keepouts, outline, edge_width })
+    }
+
+    /// Bounding box of the board edges, strokes included (as KiCad's
+    /// GetBoardEdgesBoundingBox).
+    pub fn edge_bbox(&self) -> (Pt, Pt) {
+        let (lo, hi) = crate::geom::bbox(&self.outline);
+        let h = self.edge_width / 2.0;
+        (lo - pt(h, h), hi + pt(h, h))
     }
 
     /// Every plated or unplated hole: (centre, radius).
