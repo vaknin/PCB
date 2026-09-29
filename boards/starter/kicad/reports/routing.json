@@ -1,0 +1,34 @@
+{
+  "unrouted_connections": 0,
+  "track_segments": 258,
+  "track_length_mm": {
+    "B.Cu": 214.0,
+    "F.Cu": 460.3
+  },
+  "vias_total": 94,
+  "vias_gnd": 74,
+  "vias_signal": 20,
+  "copper_in_keepouts": [],
+  "thinner_than_class_mm": {
+    "+3V3": 5.3,
+    "+5V": 8.3,
+    "/I2C_SCL": 2.6,
+    "/I2C_SDA": 5.5,
+    "/UART_RX": 1.3,
+    "/UART_TX": 3.2,
+    "/USB_D-": 1.2,
+    "GND": 21.9
+  },
+  "gnd_pours": {
+    "F.Cu": {
+      "pieces": 3,
+      "filled_pct": 64.9,
+      "largest_piece_pct_of_fill": 79.7
+    },
+    "B.Cu": {
+      "pieces": 1,
+      "filled_pct": 77.9,
+      "largest_piece_pct_of_fill": 100.0
+    }
+  }
+}

@@ -3,6 +3,45 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-014 Starter board changes after the datasheet check and blind review (DECIDED, technical, 2026-09-29)
+Reports: `research/2026-09-29-datasheet-check.md` (every pin VERIFIED) and `research/2026-09-29-blind-review.md`.
+- **Capacitors on 3V3:** C3 at the module is now 22 µF and C2 at the regulator 1 µF (were 10 µF and 22 µF). This follows Espressif's 22 µF + 0.1 µF at the module. It also brings the total (~23 µF nominal, less under 3.3 V bias; inferred) back to the edge of ST's LDL1117 stability plot, which only covers 1–22 µF. The board had 32 µF.
+- **Fuse before TVS:** D3 (SMF5.0A) now sits on +5V after F1. A faulty charger trips the fuse instead of burning the TVS.
+- **C1 moved** under U2, next to its input pin (it was ~7 mm away, reached through vias).
+- **USB net class never applied:** its patterns `USB_D+` didn't match KiCad's `/USB_D+`. Now `*USB_D*`. A new `netclasses` gate (in `sch` and `check`) fails when any pattern matches no net, and was checked against the old patterns.
+- **Stitching vias** now check their distance to other-net tracks directly (≥ 0.25 mm). One via ended up 0.185 mm from a track even though it was inside the pour; cause not found.
+- **Deferred to "before a real order":**
+  - Extra 3V3 copper under the regulator tab for cooling. The reviewer estimates a 50–70 °C rise at 0.4 W (inferred).
+  - The fuse's hot-derating margin (no derating curve in its datasheet).
+  - The 12 × 0.2 mm thermal-via holes in KiCad's ESP32-S3-WROOM-1 footprint. JLCPCB allows them but charges extra for holes under 0.3 mm. Check the quote.
+- **Before paying:** check the 8 UNVERIFIED rotations in JLCPCB's preview. D3 matters most: a reversed TVS shorts +5V.
+
+## D-013 Stack survey confirms the stack (DECIDED, 2026-09-29)
+- Session pcb-99 surveyed the alternatives (`research/2026-09-29-stack-survey.md`). Nothing is both better and within the owner's rules (1.0+, local CLI, no lock-in), so D-004 stands.
+- **Revisit:** Diode `pcb`/Zener at its 1.0 (placement-preserving netlist sync).
+- **Optional second opinions, never gates:** `pcb dfm` and kicad-happy's analysers.
+- **Optional paid fallback router for dense boards:** DeepPCB's API, with the owner's OK.
+- **D-005 note:** SKiDL's UUIDs are now deterministic, but the drawing-quality reason still holds.
+
+## D-012 Routing and fab details learned on the starter board (DECIDED, technical, 2026-09-29)
+- **The router never sees the copper pours.** When the DSN includes the GND pours, Freerouting counts every GND pad as connected and routes none of them. Tracks then cut the top pour into pieces, and pads were stranded (DRC `unconnected_items`, the 5 errors in `2cca03f`). The export step now removes the pours from the DSN, so every GND pad gets a real track. The pours and stitching vias come on top of that.
+- **Power net class: 0.3 mm (was 0.4).** The committed `2cca03f` board was routed with net classes silently missing: every net was at 0.2 mm. With the classes applied, a 0.4 mm track could not reach the SHT40's 3V3 escape stub in 3 tries. At 0.3 mm it routes. 0.3 mm on 1 oz outer copper carries about 1 A at a 10 °C rise (IPC-2221), twice the ~0.5 A peak.
+- **Freerouting retries:** up to 3 tries while any net other than the pour net is left unrouted. The ones seen so far failed the same way every try, so a retry mostly helps when luck is involved; the DRC gate decides.
+- **Stitching fallback:** a pour piece with no free spot outside courtyards may get its via inside a courtyard, if it clears every pad by 0.2 mm (a tented via under a part body). A via in a pad would wick solder.
+- **CPL rotations:** corrections come from the community table used by kicad-jlcpcb-tools (JLCKicadTools `cpl_rotations_db.csv`). Only unpolarised R/C/fuse parts are assumed to need no correction. Every other part without a table entry is listed as UNVERIFIED in `fab/README.md`, to check in JLCPCB's placement preview before paying.
+- **Gates now:** netlist round trip (after `sch` and in `check`), ERC, DRC, and a routing report (`reports/routing.json`). The routing report fails on any unrouted connection or any track/via in a keep-out.
+
+## D-011 SWIG segfaults: root cause fixed; SWIG steps isolated (DECIDED, owner approved the scope, 2026-09-29)
+- **Root cause, found with glibc's heap checker** (`LD_PRELOAD=/usr/lib/libc_malloc_debug.so GLIBC_TUNABLES=glibc.malloc.check=3 PYTHONMALLOC=malloc`):
+  1. pcbnew's Python `Remove()` sets `thisown=1`, so Python frees each removed track while KiCad still points at it (connectivity, DSN export). `route.py` removed old tracks at the start of every run, so every later step read freed memory. Removed tracks are now leaked on purpose (the process is short-lived), and connectivity is rebuilt.
+  2. `zone.Outline()`, `fp.GetCourtyard()` and polygon `COutline(i)` come back with `thisown=True`, so Python would delete KiCad's own polygons. `pcbgen.kicad.borrowed()` marks them as KiCad's.
+- **Isolation (the owner approved steps 3 and 4 of pcb-99's plan):**
+  - Every stage runs in its own process when several stages are run together.
+  - Inside `route`, each SWIG step (DSN export, SES import, stitching) runs in its own process (`kicad.run_step`). A crash reads "step X crashed (SIGSEGV)" and can't corrupt later steps.
+  - Zones are filled by kicad-cli (`pcb drc --refill-zones --save-board`), not by SWIG's `ZONE_FILLER`.
+- **Deferred to the KiCad 11 port:** writing the `.kicad_pcb` directly as S-expressions (step 2). With the root cause fixed, it is a large rewrite with no bug behind it, and the owner wants this test project kept lean.
+- **Result:** the full pipeline runs clean under the heap checker.
+
 ## D-010 Layout and routing automation in pcbgen (DECIDED, technical, 2026-09-29)
 Everything below lives in the generator, so every future board gets it.
 - **References go to the fab layer.** Owner-facing silk labels (5V, 3V3, GND, TX, RX, SDA, SCL, PWR, LED, RESET, BOOT, Qwiic) are `Text` entries in `layout.py`. The title goes on the back silk. JLCPCB's minimum text height is 1.0 mm.
@@ -12,10 +51,10 @@ Everything below lives in the generator, so every future board gets it.
   - `route.py` keeps locked tracks when it clears old routing.
 - **GND stitching** after routing (`route.stitch`), because Freerouting doesn't stitch and a top pour cut by tracks leaves disconnected pieces:
   - A 3 mm grid of 0.6/0.3 vias, placed only where a via fits fully inside the filled pour on both layers, outside every courtyard and ≥0.5 mm hole-to-hole.
-  - Then one via per remaining pour piece, found by a fine search. **This step crashed Python (segfault, 5 times). A fix that uses polygon copies is written but UNTESTED** (see HARDWARE_LESSONS, "Tool gotchas").
+  - Then one via per remaining pour piece, found by a fine search. (It crashed Python until the SWIG ownership bugs were fixed: D-011.)
 - **Net classes (starter):**
   - Default 0.2 mm track / 0.15 mm clearance, so signals escape the SHT40's 0.3 mm pads.
-  - Power 0.4/0.2: > 1 A at a 10 °C rise per IPC-2221, against a ~0.5 A peak.
+  - Power 0.3/0.2 (was 0.4, see D-012): about 1 A at a 10 °C rise per IPC-2221, against a ~0.5 A peak.
   - USB 0.3/0.15.
   - JLCPCB's floor is 0.1/0.1.
 - **Waivers:** an accepted warning needs a `(type, substring, reason)` entry in the board's `WAIVERS`. The `check` stage now passes them to the gates. The starter waives only cosmetic silk items:
@@ -130,4 +169,9 @@ at JLCPCB (the 5-board price covers up to 100×100).
   - a 4-layer routing variant for comparison
   - vendoring the verified footprints into the repo
   - a full JLCPCB parts/cost script
-  - a project skill for the pipeline
+  - (project skill: done as the global draft `~/.claude/skills/pcb-pipeline/SKILL.md`, at the owner's request)
+  - from D-014: 3V3 copper under the LDO tab for cooling; the PTC fuse's hot-derating margin; the ESP32 footprint's 0.2 mm holes (extra JLCPCB fee?)
+  - check every UNVERIFIED rotation in JLCPCB's placement preview (list in `boards/<name>/fab/README.md`)
+  - the fab's own manufacturability check on upload; current fab promotions (NextPCB Rev 0 vs JLCPCB); the A/B/C cost table from `docs/brief.md`
+- **KiCad 11 port** (SWIG pcbnew removed): write the `.kicad_pcb` directly (D-011 step 2), keep DSN/SES as the only other SWIG steps, or use KiCad 11's headless IPC API. Consider Rust for the generator then, if the pipeline becomes permanent (see the skill).
+- **Unexplained, harmless for now:** why the `2cca03f` board was routed without its net classes (a fresh `sch pcb route` applies them), and why one stitching via landed 0.185 mm from a track while inside the pour (now checked directly).

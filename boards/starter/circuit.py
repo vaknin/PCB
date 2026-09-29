@@ -61,7 +61,7 @@ def build() -> Circuit:
     R("R1", "5.1k", cc1, gnd, "USB-C input")
     R("R2", "5.1k", cc2, gnd, "USB-C input")
 
-    # ESD: 0.6 pF clamp on D+/D- (pins 1, 2 = I/O, 3 = GND) and a 200 W TVS on VBUS.
+    # ESD: 0.6 pF clamp on D+/D- (pins 1, 2 = I/O, 3 = GND) and a 200 W TVS on +5V (after the fuse).
     # Both JLCPCB Preferred Extended (no loading fee); see DECISIONS.md D-008.
     # The KiCad symbol is a generic dual TVS: only the pin numbers matter.
     esd = c.part("U3", "Device:D_TVS_Dual_AAC", "H5VUT2U", "Package_TO_SOT_SMD:SOT-23",
@@ -71,7 +71,8 @@ def build() -> Circuit:
     gnd += esd["3"]
     d3 = c.part("D3", "Diode:SMF5V0A", "SMF5.0A", "Diode_SMD:D_SOD-123F",
                 lcsc="C19077497", mpn="SMF5.0A", block="USB-C input", rot=90)
-    vbus += d3["1"]      # cathode
+    # after the fuse (on +5V): a faulty charger trips the fuse instead of burning the TVS
+    v5 += d3["1"]        # cathode
     gnd += d3["2"]
 
     f1 = c.part("F1", "Device:Polyfuse", "500mA", "Fuse:Fuse_1206_3216Metric",
@@ -89,7 +90,9 @@ def build() -> Circuit:
     v3 += u2["VO"]
     gnd += u2["GND"]
     C("C1", "10u", v5, gnd, "3.3 V regulator")
-    C("C2", "22u", v3, gnd, "3.3 V regulator")
+    # 1u at the regulator, 22u at the module (Espressif Fig. 9-1): keeps the total on 3V3
+    # (~23 uF nominal, less at 3.3 V bias) at the edge of ST's 1-22 uF stability plot
+    C("C2", "1u", v3, gnd, "3.3 V regulator")
     pwr_led = c.net("PWR_LED")
     # green Vf is up to 3.1 V, too close to 3.3 V: feed it from 5 V (about 2 mA)
     R("R3", "1k", v5, pwr_led, "3.3 V regulator")
@@ -103,7 +106,7 @@ def build() -> Circuit:
                 block="ESP32-S3")
     v3 += u1["3V3"]
     gnd += u1["GND"]
-    C("C3", "10u", v3, gnd, "ESP32-S3")
+    C("C3", "22u", v3, gnd, "ESP32-S3")
     C("C4", "100n", v3, gnd, "ESP32-S3")
     dm += u1["USB_D-"]
     dp += u1["USB_D+"]

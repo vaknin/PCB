@@ -7,10 +7,14 @@ so every accepted warning has a written reason in git.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import subprocess
 from collections import Counter
 from pathlib import Path
+
+from .circuit import Circuit
+from .sexpr import find, find_all, parse
 
 
 def _cli(*args: str) -> subprocess.CompletedProcess:
@@ -77,7 +81,66 @@ def drc(project_dir: Path, name: str, waivers=()) -> bool:
     return _judge("DRC", _violations(json.loads(out.read_text())), list(waivers))
 
 
-def run(project_dir: Path, name: str, waivers=()) -> bool:
+def export_netlist(sch: Path) -> list:
+    out = sch.with_suffix(".net")
+    res = _cli("sch", "export", "netlist", "--format", "kicadsexpr", "-o", str(out), str(sch))
+    if res.returncode != 0 or not out.exists():
+        raise RuntimeError(f"netlist export failed: {res.stdout}\n{res.stderr}")
+    tree = parse(out.read_text())
+    out.unlink()
+    return tree
+
+
+def netlist(project_dir: Path, name: str, circuit: Circuit) -> bool:
+    """Round trip: the netlist KiCad reads back from our schematic must group exactly the
+    pins that circuit.py connects. Catches a writer bug (a label on the wrong pin, a
+    stray wire) that ERC can't see, since a wrong but tidy schematic passes ERC.
+
+    Nets are compared as pin sets (names differ: KiCad prefixes local labels with "/").
+    Single-pin "unconnected-(...)" nets are KiCad's own names for no-connect pins.
+    Verified to fail when a pin is dropped from a circuit.py net (2026-09-29).
+    """
+    tree = export_netlist(project_dir / f"{name}.kicad_sch")
+    kicad = {}
+    for n in find_all(find(tree, "nets"), "net"):
+        pins = frozenset((find(x, "ref")[1], find(x, "pin")[1]) for x in find_all(n, "node"))
+        nname = find(n, "name")[1]
+        if not (nname.startswith("unconnected-") and len(pins) == 1):
+            kicad[pins] = nname
+    # "#..." refs (PWR_FLAG) are ERC markers only; KiCad leaves them out of the netlist
+    ours = {frozenset((p.part.ref, p.pin.number) for p in net.pins
+                      if not p.part.ref.startswith("#")): net.name
+            for net in circuit.nets.values() if net.pins}
+    only_kicad = [f"{kicad[s]}: {sorted(s)}" for s in kicad.keys() - ours.keys()]
+    only_ours = [f"{ours[s]}: {sorted(s)}" for s in ours.keys() - kicad.keys()]
+    ok = not only_kicad and not only_ours
+    print(f"== NETLIST: {len(ours)} nets in circuit.py, {len(kicad)} in KiCad's netlist")
+    for line in only_ours:
+        print(f"   OPEN:   circuit.py net missing from the schematic: {line}")
+    for line in only_kicad:
+        print(f"   OPEN:   schematic net not in circuit.py: {line}")
+    print(f"== NETLIST: {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
+def netclasses(project_dir: Path, name: str, rules) -> bool:
+    """Every net-class pattern must match a net in KiCad's netlist. A pattern that
+    matches nothing leaves its nets on Default silently (seen: "USB_D+" vs KiCad's
+    "/USB_D+"), and every later gate passes on the wrong rules."""
+    tree = export_netlist(project_dir / f"{name}.kicad_sch")
+    nets = [find(n, "name")[1] for n in find_all(find(tree, "nets"), "net")]
+    dead = [f"{nc.name}: {pat!r}" for nc in rules.classes for pat in nc.patterns
+            if not any(fnmatch.fnmatchcase(n, pat) for n in nets)]
+    for d in dead:
+        print(f"   OPEN:   net-class pattern matches no net: {d}")
+    print(f"== NETCLASSES: {'PASS' if not dead else 'FAIL'}")
+    return not dead
+
+
+def run(project_dir: Path, name: str, circuit: Circuit, rules, waivers=()) -> bool:
+    from . import report   # reads the board DRC just refilled and saved
+    n = netlist(project_dir, name, circuit) and netclasses(project_dir, name, rules)
     a = erc(project_dir, name, waivers)
     b = drc(project_dir, name, waivers)
-    return a and b
+    r = report.run(project_dir, name, rules)
+    return n and a and b and r

@@ -6,7 +6,7 @@ top-left corner, Y pointing down; each Place is the footprint's own origin.
 The module sits top-centre with its antenna flush with the top edge. Its
 footprint carries Espressif's antenna keep-out (no copper or parts in a 48 mm
 wide band level with the antenna, and 15 mm beyond it, which is off-board here).
-Power enters bottom-centre (USB-C) and goes left through the TVS and fuse to the
+Power enters bottom-centre (USB-C) and goes left through the fuse and TVS to the
 regulator (lower left), then up to the module's 3V3 pad. The sensor sits
 bottom-right, the spot furthest from the regulator and the module (both run
 warm); the Qwiic port is on the right edge above it.
@@ -23,11 +23,12 @@ MOD_X, MOD_Y = W / 2, 12.75          # module body is 25.5 mm tall; top edge at 
 RULES = BoardRules(classes=[
     # 0.2/0.15 lets signals escape the SHT40's 0.3 mm pads (0.8 mm pitch); JLCPCB's floor is 0.1/0.1.
     NetClass("Default", track=0.2, clearance=0.15, via_diameter=0.6, via_drill=0.3),
-    # 0.4 mm on 1 oz outer copper carries > 1 A at a 10 C rise (IPC-2221); peak draw is ~0.5 A.
-    NetClass("Power", track=0.4, clearance=0.2, via_diameter=0.8, via_drill=0.4,
+    # 0.3 mm on 1 oz outer copper carries ~1 A at a 10 C rise (IPC-2221); peak draw is ~0.5 A.
+    # 0.4 mm left the SHT40's 3V3 pad unroutable (its 0.8 mm-pitch escape stubs are too tight).
+    NetClass("Power", track=0.3, clearance=0.2, via_diameter=0.8, via_drill=0.4,
              patterns=["VBUS", "+5V", "+3V3", "GND"]),
     NetClass("USB", track=0.3, clearance=0.15, via_diameter=0.6, via_drill=0.3,
-             patterns=["USB_D+", "USB_D-"]),
+             patterns=["*USB_D*"]),   # KiCad names local nets "/USB_D+"
 ])
 
 SPEC = BoardSpec(
@@ -49,7 +50,7 @@ SPEC = BoardSpec(
         "F1": Place(17.0, 35.0, 90),
         # regulator, lower left
         "U2": Place(7.5, 26.0, 90),
-        "C1": Place(4.0, 33.5, 90),
+        "C1": Place(7.5, 31.8, 180),       # LDO input cap under U2: +5V pad at pin 3, GND pad at pin 1
         "C2": Place(11.0, 33.5, 90),
         "R3": Place(4.5, 36.5, 0),         # power LED, fed from +5V
         "D1": Place(4.5, 39.0, 0),

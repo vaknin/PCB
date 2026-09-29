@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import math
 import os
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .kicad import pcbnew
-
+from .gates import export_netlist
+from .kicad import borrowed, pcbnew
 from .sexpr import find, find_all, parse
 
 ORIGIN = (100.0, 100.0)   # board top-left on the KiCad page, mm
@@ -69,17 +68,6 @@ def mm(v: float) -> int:
 
 def pt(x: float, y: float) -> pcbnew.VECTOR2I:
     return pcbnew.VECTOR2I(mm(ORIGIN[0] + x), mm(ORIGIN[1] + y))
-
-
-def export_netlist(sch: Path) -> list:
-    out = sch.with_suffix(".net")
-    res = subprocess.run(["kicad-cli", "sch", "export", "netlist", "--format", "kicadsexpr",
-                          "-o", str(out), str(sch)], capture_output=True, text=True)
-    if res.returncode != 0 or not out.exists():
-        raise RuntimeError(f"netlist export failed: {res.stdout}\n{res.stderr}")
-    tree = parse(out.read_text())
-    out.unlink()
-    return tree
 
 
 def _fp_lib_paths(project_dir: Path) -> dict[str, Path]:
@@ -149,7 +137,7 @@ def _escape_stubs(board: pcbnew.BOARD, fp: pcbnew.FOOTPRINT, reach: float = 0.5)
         if not pad.IsOnLayer(pcbnew.F_Cu) or net is None or net.GetNetCode() <= 0 \
                 or net.GetNetname().startswith("unconnected-"):
             continue
-        if not any(z.Outline().Collide(pad.GetPosition(), mm(0.2)) for z in keepouts):
+        if not any(borrowed(z.Outline()).Collide(pad.GetPosition(), mm(0.2)) for z in keepouts):
             continue
         # pad geometry in the footprint's own frame (pads rotated by 90 deg swap axes)
         local = pad.GetFPRelativePosition()
@@ -255,7 +243,7 @@ def build(project_dir: Path, name: str, spec: BoardSpec) -> Path:
         z.SetDoNotAllowTracks(True); z.SetDoNotAllowVias(True); z.SetDoNotAllowPads(False)
         z.SetDoNotAllowZoneFills(True); z.SetDoNotAllowFootprints(False)
         z.SetZoneName(ko.name)
-        z.Outline().Append(_rect_poly(ko.x0, ko.y0, ko.x1, ko.y1))
+        borrowed(z.Outline()).Append(_rect_poly(ko.x0, ko.y0, ko.x1, ko.y1))
         board.Add(z)
 
     if spec.gnd_net in nets:
@@ -271,7 +259,7 @@ def build(project_dir: Path, name: str, spec: BoardSpec) -> Path:
             z.SetThermalReliefGap(mm(0.3))
             z.SetThermalReliefSpokeWidth(mm(0.4))
             z.SetAssignedPriority(i)
-            z.Outline().Append(_rect_poly(0, 0, spec.width, spec.height))
+            borrowed(z.Outline()).Append(_rect_poly(0, 0, spec.width, spec.height))
             board.Add(z)
 
     for t in spec.texts:
@@ -291,9 +279,3 @@ def build(project_dir: Path, name: str, spec: BoardSpec) -> Path:
     ds.SetGridOrigin(pt(0, 0))
     pcbnew.SaveBoard(str(pcb_path), board)
     return pcb_path
-
-
-def fill_zones(pcb_path: Path) -> None:
-    board = pcbnew.LoadBoard(str(pcb_path))
-    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
-    pcbnew.SaveBoard(str(pcb_path), board)

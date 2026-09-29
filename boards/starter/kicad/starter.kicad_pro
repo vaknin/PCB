@@ -212,8 +212,7 @@
       "track_widths": [
         0.0,
         0.2,
-        0.3,
-        0.4
+        0.3
       ],
       "tuning_pattern_settings": {
         "diff_pair_defaults": {
@@ -330,7 +329,7 @@
         "pcb_color": "rgba(0, 0, 0, 0.000)",
         "priority": 1,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.4,
+        "track_width": 0.3,
         "tuning_profile": "",
         "via_diameter": 0.8,
         "via_drill": 0.4,
@@ -380,11 +379,7 @@
       },
       {
         "netclass": "USB",
-        "pattern": "USB_D+"
-      },
-      {
-        "netclass": "USB",
-        "pattern": "USB_D-"
+        "pattern": "*USB_D*"
       }
     ]
   },

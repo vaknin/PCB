@@ -6862,7 +6862,7 @@
 		)
 	)
 	(symbol
-		(lib_id "power:VBUS")
+		(lib_id "power:+5V")
 		(at 43.18 156.21 180)
 		(unit 1)
 		(body_style 1)
@@ -6883,7 +6883,7 @@
 				)
 			)
 		)
-		(property "Value" "VBUS"
+		(property "Value" "+5V"
 			(at 43.18 159.41 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6959,7 +6959,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "10u"
+		(property "Value" "22u"
 			(at 153.162 124.46 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7002,7 +7002,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C15850"
+		(property "LCSC" "C45783"
 			(at 149.86 127 0)
 			(hide yes)
 			(show_name no)
@@ -10296,7 +10296,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "22u"
+		(property "Value" "1u"
 			(at 97.282 101.6 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10339,7 +10339,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C45783"
+		(property "LCSC" "C28323"
 			(at 93.98 104.14 0)
 			(hide yes)
 			(show_name no)

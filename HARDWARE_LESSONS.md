@@ -15,7 +15,17 @@ Anything unverified goes in `DECISIONS.md` open questions or is tagged UNVERIFIE
 | KiCad `USB_C_Receptacle_HRO_TYPE-C-31-M-12` | footprint origin at the body centre; body (F.Fab) ends 3.7 mm below the origin, so place it at `H - 3.7` for a flush mouth | pcbnew bounding boxes | 2026-09-29 |
 | KiCad `JST_SH_SM04B-SRSS-TB_...Horizontal` at rot 90 | mouth faces +x; signal pads on the inner side, MP tabs near the mouth | pcbnew pad positions | 2026-09-29 |
 
-**Still to verify against datasheets (next session, separate agent):** ESP32-S3-WROOM-1 pads, SHT4x pins, LDL1117 pins and max C_out, USB-C pins, Qwiic pin order (UNVERIFIED: 1 GND, 2 3V3, 3 SDA, 4 SCL).
+| ESP32-S3-WROOM-1 | pads 1 GND, 2 3V3, 3 EN, 13 IO19 = USB D−, 14 IO20 = USB D+, 25 IO48, 27 IO0, 36 RXD0, 37 TXD0, 38 IO2, 39 IO1, 40 GND, 41 EPAD = GND | Espressif WROOM-1 datasheet v1.8, Table 3-1 pp.11–12 | 2026-09-29 |
+| ESP32-S3-WROOM-1 | EN RC: 10 kΩ + 1 µF. Strapping: IO46/IO45 internal pull-downs are right for N16R8 (3.3 V flash); IO3 is ignored unless the JTAG eFuse is burned. IO48 is 1.8 V only on R16V modules. Wants 22 µF + 0.1 µF at the 3V3 pad; Wi-Fi TX peak 355 mA | WROOM-1 §9 p.41, Tables 4-1..4-5 pp.13–15, Fig. 9-1, p.28 | 2026-09-29 |
+| SHT40-AD1B | 1 SDA, 2 SCL, 3 VDD, 4 VSS; KiCad DFN-4 pad numbering matches; I²C 0x44; pull-ups ≥ 390 Ω; no copper under the sensor except its pads | Sensirion SHT4x datasheet v2, p.1, p.7, §5.4 p.13, Figs. 10–11 | 2026-09-29 |
+| LDL1117S33R | 1 GND, 2 OUT (tab = OUT), 3 IN; C_in ≥ 1 µF; dropout ~0.2–0.3 V at 0.5 A (typical, from a plot). The stability plot covers C_out 1–22 µF only, with no stated maximum | ST DocID030319 Rev 3, Fig. 2/Table 1 p.6, §6.2 p.10, Figs. 12, 20–21 | 2026-09-29 |
+| HRO TYPE-C-31-M-12 | VBUS A4/A9/B4/B9, GND A1/A12/B1/B12, CC1 A5, CC2 B5, D+ A6/B6, D− A7/B7, SBU A8/B8; KiCad pad order matches HRO's layout drawing | HRO drawing (LCSC mirror) | 2026-09-29 |
+| H5VUT2U | pin 3 = GND **confirmed** ("pin1 or pin2 to pin3", "I/O pin to GND") | Hongjiacheng datasheet Rev 2.0, p.2 | 2026-09-29 |
+| SMF5.0A | cathode band; VRWM 5 V, VBR 6.4–7.0 V, clamps at 9.2 V | SMF datasheet Rev 2.2, p.2 | 2026-09-29 |
+| Qwiic (JST SH 4-pin) | 1 GND, 2 3.3 V, 3 SDA, 4 SCL (from SparkFun's design file; their web pages give only wire colours) | github.com/sparkfunX/Qwiic_Adapter Eagle schematic | 2026-09-29 |
+| JK-nSMD050 PTC | 0.5 A hold / 1 A trip at 25 °C, up to 1 Ω after soldering; no derating table (a hot enclosure could cause nuisance trips, inferred) | Jinrui datasheet, Table 2 | 2026-09-29 |
+
+Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a separate agent that didn't build the design).
 
 (Pinouts, voltage ranges and footprints get added here as each is checked against its datasheet.)
 
@@ -55,7 +65,17 @@ Anything unverified goes in `DECISIONS.md` open questions or is tagged UNVERIFIE
 - **atopile 0.15.x:** it cannot read KiCad 10-saved boards.
 - **SWIG `pcbnew` on Python 3.14:** every `for x in board.Tracks()` / `fp.GraphicalItems()` raises `'SwigPyIterator' object has no attribute 'next'`. `pcbgen/kicad.py` aliases `next = __next__`; always `from .kicad import pcbnew`.
 - **SWIG `pcbnew` has no `RotatePoint`.** Rotate by hand: board = (x·cos + y·sin, −x·sin + y·cos), with the angle CCW and Y pointing down.
-- **Segfault risk (inferred, 2026-09-29):** holding `zone.GetFilledPolysList(layer).Outline(i)` (a reference into KiCad's fill buffer) while adding vias crashed Python 5 times. The crash shows up later, inside an unrelated `import`. Work on `CloneDropTriangulation()` copies and `SHAPE_LINE_CHAIN(poly.COutline(i))`. Run crash-prone scripts with `python -X faulthandler -u`, because a segfault loses buffered stdout.
+- **SWIG ownership bugs cause the segfaults (verified 2026-09-29 with glibc's heap checker, D-011):**
+  - `board.Remove(item)` sets `thisown=1`: Python frees the item while KiCad's connectivity and DSN export still point at it. After `Remove`, set `item.thisown = False` (leak it) and call `board.BuildConnectivity()`.
+  - `zone.Outline()`, `fp.GetCourtyard(layer)`, `poly.COutline(i)` return KiCad-owned objects with `thisown=True`. Wrap them in `pcbgen.kicad.borrowed()`. Copy them (`SHAPE_POLY_SET(...)`) if they must outlive an edit.
+  - The crash shows up later and somewhere unrelated (inside an `import`, inside `traceback` printing an ordinary exception, or as board items turning into bare `SwigPyObject`s).
+  - To find the real culprit, run with `LD_PRELOAD=/usr/lib/libc_malloc_debug.so GLIBC_TUNABLES=glibc.malloc.check=3 PYTHONMALLOC=malloc python -X faulthandler -u ...`. It then crashes at the first bad access, and the Python frame points at the step.
+  - `coredumpctl debug <pid>` showing `Py_RunMain → PyImport_Import` means Python was printing an uncaught exception on a corrupted heap. Catch it and print with `os.write` to see it.
+  - Board items themselves (`GetTracks()`, `GetFootprints()`, pads, zones) come back with `thisown=False`, so they're fine.
+- **Freerouting and copper pours:** zones go into the DSN as `plane`s, and Freerouting then counts every pad on that net as connected and routes none of them. Take the pours out of the board before the DSN export (D-012).
+- **Freerouting output varies run to run, and can neck tracks down** to pad width near small pads (0.225 or 0.15 mm on a 0.3 mm class). DRC accepts it; `reports/routing.json` lists it.
+- **`kicad-cli pcb drc --refill-zones --save-board`** is the headless zone fill (there is no separate fill command). `pcbgen.kicad.fill_zones` uses it.
+- **Worktree sessions:** `.venv` and `tools/` are gitignored in the main checkout. Symlink them into a worktree (`ln -s /home/kivan/Projects/PCB/.venv .venv`, same for `tools`). The symlinks show as untracked (the ignore rules end in `/`); don't commit them.
 - **SWIG "memory leak of type PCB_TRACK/PCB_VIA" lines** at exit are harmless noise. Filter them with `grep -v "swig/python detected"`.
 - **KiCad 11 removes the SWIG `pcbnew` module** (DSN export, SES import, zone fill, stitching all use it). Arch upgrades KiCad on a normal `pacman -Syu`. When KiCad 11 lands, either hold the package or port `pcb.py`/`route.py` to the IPC API (which needs the GUI) or direct file editing. Timing is not yet confirmed.
 - **Freerouting and footprint keep-outs:** Freerouting routes to pad *centres*. A footprint keep-out with only a pad-sized notch (SHT40) makes those pads unroutable; a locked escape stub fixes it (D-010). Freerouting's log "N unrouted" is the first thing to read.
@@ -63,7 +83,10 @@ Anything unverified goes in `DECISIONS.md` open questions or is tagged UNVERIFIE
 - **All KiCad `TestPoint_Pad_*` footprints** put the silk ring 0.14 mm from the pad, under JLCPCB's 0.15 mm guideline (waived; cosmetic).
 - **DRC schematic parity** expects no-connect pads to carry KiCad's `unconnected-(...)` nets, and footprint `Datasheet` fields to match the symbol's.
 
+- **JLCPCB CPL rotations:** the community correction table is `matthewlai/JLCKicadTools/jlc_kicad_tools/cpl_rotations_db.csv` (the kicad-jlcpcb-tools plugin downloads it). Entries used here: `^SOT-223` +180, `^SOT-23` −90, `^USB_C_Receptacle_HRO_TYPE-C-31-M-12` +180. The ESP32-S3-WROOM-1, the SHT4x DFN, JST SH, TS-1187A switches, LEDs and SOD-123F have no entry (UNVERIFIED; check the JLCPCB preview).
+
 ## Mistakes to avoid
+- **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
 - **Run a DRC before routing.** Courtyard overlaps, silk collisions and parity errors show up there, and they are cheaper to fix than after a 1-minute route.
 - **Don't trust part numbers typed into code;** re-check them against the research file. The starter circuit had a wrong SHT40 LCSC# (C2757403), a wrong fuse (C70069) and an LED colour that JLCPCB doesn't stock as Basic.
 - **Green 0805 LEDs** (Vf up to 3.1 V) can't run from 3.3 V through a resistor. Feed them from 5 V.
