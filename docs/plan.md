@@ -1,10 +1,10 @@
-# Plan: firmware and enclosure tooling, then capture-clip (D-025, PROPOSED 2026-09-29)
+# Plan: firmware and enclosure tooling, then capture-clip (D-025, agreed 2026-09-29)
 
-Status: **proposed, waiting for the owner's agreement.** Nothing below is built yet. Work is
+Status: **agreed by the owner, 2026-09-29.** Nothing below is built yet. Work is
 ordered by dependency, not by date. Each step says what "done" means, so the review pages can
 show progress. Research behind it:
 - `research/2026-09-29-parts-capture-clip.md` (parts)
-- `research/2026-09-29-wokwi.md` (simulation)
+- `research/2026-09-29-wokwi.md` and `research/2026-09-29-simulators.md` (simulation)
 - `research/2026-09-29-esp32-firmware.md` (firmware facts)
 - `research/2026-09-29-enclosure-tooling.md` (case tooling and printing)
 
@@ -13,17 +13,27 @@ capture-clip**, the way pcbgen was built. Nothing here costs money; the only spe
 eventual order (boards + cases in one parcel, D-021), which needs its own summary and OK.
 
 ## What the research changed (2026-09-29)
-- **Wokwi can't simulate the microphone or deep sleep on the ESP32-S3.** The S3's I2S peripheral
-  isn't modelled, so no custom mic chip can work, and `esp_deep_sleep_start()` ends in a watchdog
-  reset. The firmware gets two sim-only switches: injected test audio (a WAV in flash) and a
-  "fake sleep" that waits for the button in a loop. Real I2S and real wake are checked on the first
-  board (bring-up self-test).
-- **Wokwi's free plan is 50 simulated minutes a month.** Short tests (5–15 s) are cheap; network
-  runs cost a minute or more. So most sim runs stop before the network, and the Capture protocol
-  code is unit-tested on the laptop.
-- **Wokwi's internet path is a public, monitored gateway.** The real Gemini key and GitHub token
-  never go into a simulation. At most one network run per round, with no secrets or with
-  throwaway ones.
+- **Simulation is open source first, in four layers** (the owner asked whether Wokwi, with 50 free
+  minutes a month, is really the best; `research/2026-09-29-simulators.md`):
+
+  | Layer | Tool | Runs | Tests | Can't do |
+  |---|---|---|---|---|
+  | 1. Logic on the laptop | ESP-IDF `linux` target (+ plain gcc unit tests) | unlimited, fast | Capture protocol (note file, `next-number`, Additions, Gemini request/parse, rate gate, retries), state machine with mocked button/LED/mic, NVS, HTTPS to a local mock server; sanitizers | hardware, LittleFS, true multi-core |
+  | 2. Whole firmware image | Espressif QEMU (GPL, `idf.py qemu`) | unlimited | boot, partition table, PSRAM, NVS, LittleFS queue + power-loss recovery, Opus encoding of injected audio, crashes; console on UART0 | GPIO, ADC, I2S, USB console, Wi-Fi, deep sleep, real timing |
+  | 3. Pins and lights | Wokwi (free 50 simulated min/month) | a few 5–15 s runs per round (~300 a month fit) | the `board.toml` pin map driven for real: press vs hold, LED colours, battery-ADC thresholds | I2S, USB console, deep sleep |
+  | 4. Real hardware | the owner's ESP32-S3 dev board, once (Phase D.5), then the first board | — | I2S mic, Wi-Fi upload, real encoder speed, deep-sleep wake and current, USB console | — |
+
+  - Wokwi is optional: if it ever blocks, layers 1, 2 and 4 still cover the design. Nothing paid.
+  - Real secrets never go into Wokwi (its internet gateway is public and monitored). Layers 1–2 use
+    a local mock server; at most one real Gemini request per test session (the quota is shared
+    with the phone).
+  - Firmware shape: hardware behind small interfaces (`mic_read`, `led_set`, `button_wait`,
+    `power_sleep`, `net_up`), one implementation per target chosen by a Kconfig
+    `BOARD_TARGET_{REAL,WOKWI,QEMU}` (plus mocks on linux). The QEMU build uses injected audio,
+    fake sleep, OpenCores Ethernet instead of Wi-Fi and a UART0 console. Flashing refuses anything
+    but REAL.
+  - Install when Phase A starts: `idf_tools.py install qemu-xtensa` and `pytest-embedded-qemu`
+    (user space); `libslirp` from pacman for QEMU's networking (one `sudo` line for the owner).
 - **Enclosure CAD: CadQuery 2.8.0** (Python, in a project uv venv): STEP import of the KiCad board,
   exact interference and clearance, STL/STEP export, headless renders. OpenSCAD still has no
   release after 2021.01 and can't read STEP; build123d is pre-1.0. Python is the rule's exception
@@ -65,20 +75,22 @@ Goal: any board gets a working, simulated, self-testing firmware from its `board
    - `[[sim.scenario]]`: named scenarios (press, hold, selftest) with expected serial lines.
    - `[provision]`: NVS key → where the value comes from (`file:~/.config/capture-notes/config#gemini_api_key`,
      `prompt`, or a literal for non-secrets). Only the reference is stored; values never enter the repo.
-4. **pcbgen `sim` stage**: writes `firmware/diagram.json`, `wokwi.toml` and the scenario YAMLs from
-   `board.toml`; builds with `idf.py` (sim config); runs `wokwi-cli` per scenario with a tight
-   `--timeout`, raised simulated CPU clock and a serial log; writes `firmware/sim.json` (pass/fail,
-   simulated seconds used). Runs only when named (it spends quota). The review page shows it.
-5. **Host unit tests** for pure-C logic (no ESP32 needed): built with the laptop's gcc and a tiny
-   runner, run by `scripts/fw-test.sh`. Used from Phase D on.
+4. **pcbgen `sim` stage**: builds the QEMU target and runs its scenarios with pytest-embedded
+   (layer 2, by default); with `sim --wokwi` it also writes `firmware/diagram.json`, `wokwi.toml`
+   and scenario YAMLs from `board.toml`, builds the Wokwi target and runs `wokwi-cli` per scenario
+   with a tight `--timeout` and a serial log (layer 3). Results, including Wokwi seconds used, go to
+   `firmware/sim.json`, which the review page shows.
+5. **`scripts/fw-test.sh`** (layer 1): the pure-C logic built with the laptop's gcc and a tiny runner,
+   plus ESP-IDF `linux`-target test apps for code that needs NVS, HTTP or FreeRTOS. Used from Phase D on.
 6. **Bring-up tool `devctl`** (a small Rust binary in `crates/devctl`): `flash` (idf.py/esptool),
    `selftest` (reads the `SELFTEST` lines and writes `boards/<name>/bringup/selftest-<date>.json`
    for the review page and errata), `provision` (reads `[provision]`, sends the values over serial,
    never prints them), `monitor`. It checks the serial port is the board named in `board.toml`
    (the firmware prints its name at boot).
 7. **Proof on the starter:** starter firmware with its 4 self-tests (`sht40`, `i2c_scan`,
-   `status_led`, `boot_button`) passing in Wokwi (an SHT40 stand-in if Wokwi has none: checked
-   while building), shown on the starter's review page.
+   `status_led`, `boot_button`): boot, partitions and self-test reporting in QEMU; the LED and
+   button tests (and an SHT40 stand-in if Wokwi has one) in Wokwi; shown on the starter's review page.
+   `idf.py qemu` boots the image with the custom partition table and PSRAM.
    **Done when:** `cargo run -p starter -- fw sim review` goes green from a clean checkout.
 
 ## Phase B: enclosure tooling, proven on the starter
@@ -120,11 +132,11 @@ Goal: a case is designed, fit-checked and rendered every round, like the board.
 
 ## Phase D: capture-clip firmware in simulation (before any circuit)
 Order matters: the parts most likely to fail go first.
-1. **Codec spike:** a v6.1 build with `esp_audio_codec` + `esp_muxer` encoding the injected WAV to
-   OGG/Opus 16 kHz/32 kbps; the output is copied off and checked on the laptop (`ffprobe`, then
+1. **Codec spike:** a v6.1 build, run in QEMU, with `esp_audio_codec` + `esp_muxer` encoding the
+   injected WAV to OGG/Opus 16 kHz/32 kbps; the output is copied off and checked on the laptop (`ffprobe`, then
    `tools/gemini_smoke.sh` from Capture, one request of the day). If the libraries won't build on
    v6.1: AAC-ADTS, or our own Ogg writer.
-2. **Capture client logic, unit-tested on the laptop** (Phase A.5): note rendering exactly like
+2. **Capture client logic, unit-tested on the laptop** (layer 1, Phase A.5): note rendering exactly like
    Capture's `NoteFile.kt` (`source: clip`), the `next-number` loop (GET → PUT with sha, retry on
    409/422, 5 tries), Additions (`## Added` with the mark line, merge on a changed sha), the Gemini
    request and answer parsing (§6 schema, "Nothing heard"), the rate gate (one request, ≥ 5 s apart,
@@ -136,12 +148,16 @@ Order matters: the parts most likely to fail go first.
    Content-Length), stay awake while USB is present (provisioning, charging lights), battery
    thresholds (no upload below 3.45 V, no recording below 3.3 V, brown-out at 2.84 V), a hold
    with no last note = a new note.
-4. **Sim scenarios:** press/record/stop, hold → addition, queue while offline, low battery,
-   self-test; each a Wokwi scenario with expected serial lines. One network run per round at most,
-   no real secrets.
-5. **Real network check:** see "Question for the owner" below.
-   **Done when:** all scenarios pass in Wokwi, the unit tests pass, and a real OGG from the device's
-   encoder turned into a Capture note.
+4. **Sim scenarios:** press/record/stop, hold → addition, queue while offline, power loss mid
+   recording, low battery, self-test; in QEMU (layer 2), with the button/LED/battery ones also in
+   Wokwi (layer 3). No real secrets in any simulation.
+5. **Dev-board session** (the owner plugs in their ESP32-S3 once; "not now, save it for later
+   phase"): when D.1–D.4 pass and before the circuit is written, so its findings still change the
+   design. Checks real Wi-Fi, the encoder's speed on real silicon, provisioning over USB, a real
+   note end to end, and deep-sleep wake on GPIO0. No plug-in mic is bought (the owner's rule); the
+   mic is proven on the first board.
+   **Done when:** the host tests and QEMU scenarios pass, a real OGG from the device's encoder
+   became a Capture note, and the dev-board checklist is green.
 
 ## Phase E: capture-clip circuit, layout and case (design rounds)
 1. **Circuit** (`boards/capture-clip`, crate + `board.toml`; drop the `Cargo.toml` exclude). From the
@@ -189,12 +205,9 @@ Not now: capture-clip waits for other boards to share the parcel (D-021).
   verified footprints (done for new parts as part of Phase B.2), the A/B/C table, promos, D-021's
   two questions, the unexplained `2cca03f` items.
 
-## Questions for the owner (features and money only)
-1. **Do you agree with this plan and its order** (shared tools first, proven on the starter, then
-   capture-clip)?
-2. **One real-hardware test, no buying and no soldering:** plugging your existing ESP32 dev board
-   into the laptop once, so the recording's encoder, the Wi-Fi upload and a real Gemini note can be
-   tried on real hardware (the simulation can't do the network safely). If it isn't an ESP32-S3, the
-   test is smaller (network only).
-3. **Wokwi:** the free 50 minutes a month should do; if the rounds run out of it, the Hobby plan is
-   about €5.6 a month. You'd be asked before it's bought.
+## The owner's answers (2026-09-29)
+- Agreed the plan.
+- The dev-board test: "I can plug my esp32s3 once, but not now, save it for later phase" → Phase D.5.
+- "50 minutes sound like nothing, are you sure Wokwi is the best one? no open-source method?" →
+  simulation is now open source first (QEMU and the linux target, unlimited), with Wokwi kept only
+  for the pin-map checks QEMU can't do.

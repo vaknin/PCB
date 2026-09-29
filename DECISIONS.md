@@ -3,12 +3,19 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
-## D-025 Plan: shared firmware and enclosure tooling (proven on the starter), then capture-clip (PROPOSED, waiting for the owner, 2026-09-29)
+## D-025 Plan: shared firmware and enclosure tooling (proven on the starter), then capture-clip (DECIDED, owner agreed, 2026-09-29)
 - **Owner's words (relayed by session pcb-df):** "plan everything, including enclosure, firmware, etc."
 - **The plan:** `docs/plan.md`. Phases: A shared firmware base (`firmware/components/`, template, `sim` stage, `devctl` bring-up tool); B enclosure tooling (`case` stage, CadQuery template, fit gate); C workflow changes (the case moves into the design rounds; battery and sleep budgets in `board.toml`); D capture-clip firmware in simulation; E its circuit, layout and case in rounds; F order, bring-up, next revision.
-- **Research:** `research/2026-09-29-wokwi.md`, `research/2026-09-29-esp32-firmware.md`, `research/2026-09-29-enclosure-tooling.md`.
+- **Owner's answers:** agreed the plan. "I can plug my esp32s3 once, but not now, save it for later phase" → one dev-board session in Phase D.5, after the simulated firmware passes and before the circuit is written. "50 minutes sound like nothing, are you sure Wokwi is the best one? no open-source method?" → see Simulation below.
+- **Research:** `research/2026-09-29-simulators.md`, `research/2026-09-29-wokwi.md`, `research/2026-09-29-esp32-firmware.md`, `research/2026-09-29-enclosure-tooling.md`.
 - **Technical choices in it (Claude's, final once the plan is agreed):**
-  - **Simulation:** Wokwi, with sim-only firmware switches for audio (a WAV in flash) and sleep (a loop), because the S3's I2S and deep sleep aren't simulated. Real secrets never go into Wokwi (its internet gateway is public and monitored). The Capture protocol code is unit-tested on the laptop instead.
+  - **Simulation: open source first, four layers.**
+    1. ESP-IDF's `linux` target plus plain gcc tests for the logic.
+    2. Espressif's QEMU (GPL, already listed in IDF v6.1's tools) for the whole image: boot, partitions, PSRAM, NVS, LittleFS, the encoder.
+    3. Wokwi only for GPIO/ADC checks (press vs hold, LED colours, battery thresholds), which QEMU can't emulate.
+    4. The real board, and the owner's dev board once, for I2S, Wi-Fi, USB, deep sleep and timing.
+    - Why: layers 1–2 are unlimited and local. Wokwi's free 50 simulated minutes a month then only has to cover short pin checks (~300 runs of 10 s). No simulator models the S3's I2S or deep sleep, so the firmware has sim-only switches (injected WAV, fake sleep) and a target choice `BOARD_TARGET_{REAL,WOKWI,QEMU}`; flashing refuses non-REAL builds. Renode has no real S3 support.
+    - Real secrets never go into Wokwi (public, monitored gateway); layers 1–2 test against a local mock server.
   - **Enclosure CAD:** CadQuery 2.8.0 in a project uv venv. OpenSCAD has no release after 2021.01 and can't read STEP; build123d is pre-1.0. Python because OpenCascade, the only mature open CAD kernel, is reached from it.
   - **3D models:** fetched one by one (KiCad GitLab tag 10.0.6, plus easyeda2kicad for USB-C, the RGB LED and JST PH) into `lib/3dmodels/`. `kicad-library-3d` (D-001's deferral) is not installed.
   - **Audio:** OGG/Opus 16 kHz mono 32 kbps via `esp_audio_codec` 2.6.2 + `esp_muxer` 1.2.3 (closed, Espressif-only licence; test build on v6.1 first). Fallback AAC-ADTS or our own Ogg writer.
