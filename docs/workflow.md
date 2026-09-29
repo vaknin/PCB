@@ -23,8 +23,8 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
 - **The gate fails if they drift** (runs in `sch`, `check` and `fw`): a requirement nothing covers or missing from `spec.md`, a pin on a different net or GPIO than the circuit, a GPIO the circuit uses that the map lacks, loads over the power budget. Full list: D-023.
 
 ## 3. Firmware in simulation
-- ESP-IDF (D-009), in `boards/<name>/firmware/`, run in **Wokwi** with virtual sensors, LEDs and buttons wired to `board.toml`'s pin map. It includes the generated `board_pins.h`.
-- **Wokwi is not set up yet** (D-023). It needs ESP-IDF, `wokwi-cli` and a Wokwi token. Set it up with the first firmware: a `firmware/wokwi.toml` plus `diagram.json`, with the parts on the pins from `board_pins.h`. The review page notices `wokwi.toml`.
+- ESP-IDF (D-009), in `boards/<name>/firmware/` (the `fw` stage copies `templates/firmware` there once), using the shared components in `firmware/components/` and the generated `board_pins.h`.
+- Open source first (D-025): the `sim` stage runs the whole image in Espressif's QEMU (free, unlimited); `sim --wokwi` also runs the pin checks in Wokwi (50 free simulated minutes a month), from the `diagram.json`, `wokwi.toml` and scenario the `fw` stage writes from `board.toml`'s `sim` parts and `[[sim.wokwi_step]]`s. Results go to `firmware/sim.json` and the review page.
 - Includes a self-test mode that checks every part on the board and reports over USB. The same self-test runs at bring-up.
 - **No physical prototype by default.** The owner won't buy modules or solder.
   - Claude asks for a dev-board test only for a specific risk simulation can't settle, e.g. a sensor's behaviour in real air.

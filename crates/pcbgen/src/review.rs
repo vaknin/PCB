@@ -45,6 +45,60 @@ fn gate_label(g: &str) -> &'static str {
     }
 }
 
+/// The firmware's simulation results (`firmware/sim.json`, written by the `sim` stage, D-025):
+/// one table per simulator, with each self-test's result in plain words.
+fn firmware_section(path: &Path, risks: &mut Vec<String>) -> String {
+    let Some(sim) = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else {
+        risks.push("The firmware hasn't been run in simulation (the <code>sim</code> stage).".into());
+        return "<p>Not run yet.</p>".into();
+    };
+    let kinds = [
+        ("qemu", "The whole firmware on a simulated chip (QEMU: free, no limit). It has no pins, so pin tests skip here."),
+        ("wokwi", "Buttons and lights on simulated pins (Wokwi: 50 free minutes a month)."),
+    ];
+    let mut out = String::new();
+    for (key, what) in kinds {
+        let r = &sim[key];
+        if r.is_null() {
+            out += &format!("<h3>{}</h3>\n<p class=\"muted\">{what} Not run yet.</p>\n", if key == "qemu" { "QEMU" } else { "Wokwi" });
+            continue;
+        }
+        let ok = r["ok"] == true;
+        let date = r["date"].as_str().or(sim["date"].as_str()).unwrap_or("?");
+        let mut rows = String::new();
+        for t in r["tests"].as_array().into_iter().flatten() {
+            let (state, word) = match t["result"].as_str().unwrap_or("?") {
+                "pass" => ("ok", "Pass"),
+                "skip" => ("warn", "Skipped"),
+                _ => ("bad", "Fail"),
+            };
+            rows += &format!(
+                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>\n",
+                esc(t["test"].as_str().unwrap_or("?")),
+                chip(state, word),
+                esc(t["detail"].as_str().unwrap_or(""))
+            );
+        }
+        let problems: Vec<String> = r["problems"].as_array().into_iter().flatten().filter_map(|p| p.as_str()).map(|p| format!("<li>{}</li>", esc(p))).collect();
+        let name = if key == "qemu" { "QEMU" } else { "Wokwi" };
+        if !ok {
+            risks.push(format!("The firmware fails in {name} (see Firmware in simulation)."));
+        }
+        let extra = match r["sim_seconds"].as_f64() {
+            Some(s) => format!(" Used about {s:.1} s of the month's Wokwi time."),
+            None => String::new(),
+        };
+        out += &format!(
+            "<h3>{name} {}</h3>\n<p class=\"muted\">{what} Run {}.{extra}</p>\n{}\
+             <div class=\"scroll\"><table><thead><tr><th>Test</th><th>Result</th><th>Detail</th></tr></thead><tbody>\n{rows}</tbody></table></div>\n",
+            chip(if ok { "ok" } else { "bad" }, if ok { "Pass" } else { "Fail" }),
+            esc(date),
+            if problems.is_empty() { String::new() } else { format!("<ul class=\"risks\">{}</ul>\n", problems.join("")) },
+        );
+    }
+    out
+}
+
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
@@ -404,11 +458,7 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
         String::new()
     });
 
-    let firmware = if i.dir.join("firmware/wokwi.toml").exists() {
-        "A Wokwi simulation project is in <code>firmware/</code>."
-    } else {
-        "Not set up yet. It comes with the first firmware (ESP-IDF in Wokwi), wired to the pin map above."
-    };
+    let firmware = firmware_section(&i.base.join("firmware/sim.json"), &mut risks);
 
     // --- pictures ---------------------------------------------------------------------------
     let top = render(&pcb, "F.Cu,B.Cu,F.Fab,F.Courtyard,F.SilkS,Edge.Cuts", false);
@@ -462,7 +512,7 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     let _ = writeln!(h, "<section><h2>Cost</h2>\n{cost_body}\n<div class=\"scroll\"><table class=\"parts\"><thead><tr><th>Part</th><th>On the board</th><th>LCSC</th><th>Library</th><th class=\"num\">JLCPCB stock</th><th class=\"num\">Each</th><th class=\"num\">Line</th></tr></thead><tbody>\n{parts}</tbody></table></div>\n</section>");
     let _ = writeln!(h, "<section><h2>Power budget</h2>\n<div class=\"scroll\"><table><thead><tr><th>Load</th><th class=\"num\">mA</th><th>Source</th></tr></thead><tbody>\n{power}</tbody></table></div>\n</section>");
     let _ = writeln!(h, "<section><h2>Checks</h2>\n<div class=\"scroll\"><table><tbody>\n{checks}</tbody></table></div>\n</section>");
-    let _ = writeln!(h, "<section><h2>Firmware in simulation</h2>\n<p>{firmware}</p>\n</section>\n</main>");
+    let _ = writeln!(h, "<section><h2>Firmware in simulation</h2>\n{firmware}\n</section>\n</main>");
 
     let dir = i.base.join("review");
     std::fs::create_dir_all(&dir)?;
