@@ -5,4 +5,5 @@ boards/*/kicad/*-backups/
 target/
 boards/*/review/
 enclosure/.venv/
+boards/*/case/board.step
 __pycache__/

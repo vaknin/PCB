@@ -63,3 +63,27 @@ level = 1
 # [provision]
 # wifi_ssid = "prompt"
 # gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
+
+# The printed case (optional; the `case` stage, D-025 Phase B). Two parts: a tray under the board
+# and a lid, closed by self-tapping screws from below through the board's mounting holes.
+# Minimums come from the material (JLC3DP): resin walls >= 1.2, holes >= 1.0; nylon 1.5 and 1.5.
+# [case]
+# material = "resin"      # resin (JLC3DP 9600 white) | nylon (MJF PA12)
+# wall = 1.5              # side wall, mm
+# floor = 1.5             # tray floor and lid plate
+# edge_gap = 0.3          # PCB edge to the inner wall
+# top_gap = 1.0           # tallest part to the lid's underside
+# bottom_gap = 3.0        # PCB underside to the floor (standoff height)
+# min_clearance = 0.2     # fit gate: case to every part
+# screw = "M2"            # M2 | M2.5 | M3; the gate picks a length that engages 2 x d in the lid
+#
+# One per part the case must let through. kind: usb_c | connector | button | pinhole | led | vent.
+# Optional: usb_c/connector margin (0.3) and height (usb_c 3.26; a connector must give its
+# datasheet height); button diameter (cap, 4.0) and travel (0.25); pinhole diameter (1.4);
+# led style ("window" | "hole") and diameter; vent slots (3), slot_width (1.2), slot_length (5.0).
+# [[case.opening]]
+# ref = "J1"
+# kind = "usb_c"
+# [[case.opening]]
+# ref = "SW2"
+# kind = "button"

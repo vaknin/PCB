@@ -7,12 +7,13 @@ Why this shape: `DECISIONS.md` D-004, D-005, D-010 and D-016 (the Rust port, no 
 - **KiCad 10** from Arch `extra` (D-001). Only `kicad-cli` is used; no KiCad library is loaded.
 - **Rust:** pinned in `mise.toml` (1.98.1); `cargo` comes from mise.
 - **Freerouting:** `scripts/fetch-tools.sh` downloads its bundle (with its own Java 25) into `tools/` and checks it.
+- **Enclosure (the `case` stage):** `cd enclosure && uv sync` once (CadQuery 2.8.0 in a gitignored `enclosure/.venv`, ~1.7 GB, no sudo). The 3D models are committed in `lib/3dmodels/`.
 
 ## Run
 ```
-cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [cost] [review] [--out DIR] [--tries N] [--wokwi]
+cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [case] [cost] [review] [--out DIR] [--tries N] [--wokwi]
 ```
-With no stage named, `sch` to `fw` run in order; `sim`, `cost` (network) and `review` run only when named. `--out DIR` writes `DIR/kicad`, `DIR/fab`, `DIR/firmware` and `DIR/review` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each); checking the best 3 adds ~10 s.
+With no stage named, `sch` to `fw` run in order; `sim`, `case`, `cost` (network) and `review` run only when named. `--out DIR` writes `DIR/kicad`, `DIR/fab`, `DIR/firmware` and `DIR/review` instead of the board's own directories (for comparison runs). `--tries N` routes N footprint orders instead of the layout's number (`--tries 1` for a quick look while placing). A full run of the starter board takes about 2.5 min, nearly all of it Freerouting (8 orders, 4 at a time, ~55 s each); checking the best 3 adds ~10 s.
 
 | Stage | Does | Output |
 |---|---|---|
@@ -23,6 +24,7 @@ With no stage named, `sch` to `fw` run in order; `sim`, `cost` (network) and `re
 | fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections (bottom side: 180 − angle, as kicad-jlcpcb-tools); lists parts whose rotation is UNVERIFIED, and every bottom-side part | `fab/` (see `fab/README.md`) |
 | fw | the BOARD.TOML gate, then the ESP-IDF pin header from `board.toml` (a board without one is skipped); the first time, copies `templates/firmware` into `firmware/`; when a pin has a `sim` part, the Wokwi files | `firmware/board_pins.h`, `firmware/{diagram.json,wokwi.toml,wokwi-selftest.yaml}` |
 | sim | the firmware in Espressif's QEMU (free, unlimited): boot banner, the self-tests, a provisioning round trip; with `--wokwi` also the pin checks in Wokwi (quota: 50 simulated min/month, logged in `~/.config/wokwi/usage.jsonl`) | `firmware/sim.json`, logs in `firmware/build-{qemu,wokwi}/` |
+| case | the BOARD.TOML gate (with `[case]`), then `case/board.json` from the saved board (KiCad mm, y down) and `case/board.step` (`kicad-cli pcb export step --user-origin 0x0mm` with `lib/3dmodels`; fails on any "Could not add 3D model"); `enclosure/case.py` builds a tray and lid (plus a cap per `button`) and fit-checks them against the STEP: interference, clearance per case part with the nearest part, PCB edge gap, each opening against its part's 3D body, the pressed cap's travel, printability and the screw length. Passes only on `fit.json` `"ok": true`. ~50 s on the starter. A board.toml without `[case]` is skipped (D-025 Phase B) | `case/{board.json,fit.json}`, `case/case-{bottom,lid}.{step,stl}`, `case/cap-<ref>.{step,stl}`, `case/case-{iso,exploded,top}.png`; `case/board.step` (not committed) |
 | cost | prices the BOM line by line from JLCPCB's parts API (live; minimums, attrition, Extended fees), plus PCB, setup, stencil and joints, for `[order]` (default 5 bare, 2 assembled); shipping and VAT apart, since they are per parcel (D-021, D-023) | `fab/cost.json` |
 | review | the owner's review page from what the other stages wrote: renders, round and changes since the last draft tag, things to check, requirement coverage, cost against budget, power, checks (D-023) | `review/index.html` (gitignored) |
 
@@ -42,7 +44,7 @@ With no stage named, `sch` to `fw` run in order; `sim`, `cost` (network) and `re
 - **Prevention rules so far:** `RouteOptions::pad_rings` (`PadRing::new("J1", "SH")`) keeps tracks and vias off a poured pad's thermal spokes (`starved_thermal`).
 
 ## Tests
-- `cargo test --release`: unit tests that need no kicad-cli (DSN writer conventions and pad shapes, SES reader, stitching grid, router log and score, the escalation ladder, the failure report and log, net-class globs, geometry, `board.toml` parsing and every gate error, the pin header, cost arithmetic from a canned API answer, the review page's helpers). The `board.toml` tests load KiCad's installed symbol libraries.
+- `cargo test --release`: unit tests that need no kicad-cli (DSN writer conventions and pad shapes, SES reader, stitching grid, router log and score, the escalation ladder, the failure report and log, net-class globs, geometry, `board.toml` parsing and every gate error (`[case]` included), the kicad-cli missing-3D-model line (and, with kicad-cli installed, that an empty model directory fails the STEP export), the pin header, cost arithmetic from a canned API answer, the review page's helpers). The `board.toml` tests load KiCad's installed symbol libraries.
 - `cargo test --release -p starter -- --ignored`: the whole pipeline on the starter board into a temp directory, checking the reports (needs kicad-cli and Freerouting; a few minutes).
 
 ## Code layout
@@ -64,7 +66,7 @@ With no stage named, `sch` to `fw` run in order; `sim`, `cost` (network) and `re
   - `route`: Freerouting and stitching options (`RouteOptions`: `tries`, `parallel`, `fanout`, `drc_checks`, `extra_rounds`, `extra_tries`, `pad_rings`, stitching).
   - `waivers`: `Waiver { kind, substring, reason }` entries.
 - `board.toml`, `spec.md` (from `templates/`): pin map, power budget, requirements; see `docs/workflow.md` step 2. `round.md`: Claude's notes for the current design round, shown on the review page. `errata-rev<X>.md` after bring-up.
-- Generated: `kicad/`, `fab/`, `firmware/board_pins.h`, the Wokwi files and `firmware/sim.json` (committed); `review/` and `firmware/build*/` (not committed). The board's firmware source is `firmware/main/`.
+- Generated: `kicad/`, `fab/`, `firmware/board_pins.h`, the Wokwi files, `firmware/sim.json` and `case/` except `case/board.step` (committed); `review/` and `firmware/build*/` (not committed). The board's firmware source is `firmware/main/`.
 - Modified footprints go in `lib/footprints/<Lib>.pretty` (repo root); the `sch` stage points the project's fp-lib-table there for any library of that name. Currently `pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3` (D-015).
 
 ## Firmware (D-025)

@@ -1,0 +1,369 @@
+{
+  "schema": 1,
+  "date": "2026-09-30",
+  "board": "starter",
+  "material": "resin",
+  "ok": true,
+  "checks": [
+    {
+      "name": "step_matches_board",
+      "value": 0.0,
+      "limit": 0.05,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "board.step's PCB body vs board.json's outline (x = x, y = -y, bottom at z = 0); body top z 1.51, thickness 1.6"
+    },
+    {
+      "name": "interference.tray",
+      "value": 0,
+      "limit": 0.001,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "touches nothing it shouldn't"
+    },
+    {
+      "name": "clearance.tray",
+      "value": 0.3,
+      "limit": 0.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "nearest part U1"
+    },
+    {
+      "name": "interference.lid",
+      "value": 0,
+      "limit": 0.001,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "touches nothing it shouldn't"
+    },
+    {
+      "name": "clearance.lid",
+      "value": 0.3,
+      "limit": 0.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "nearest part U1"
+    },
+    {
+      "name": "interference.cap-SW2",
+      "value": 0,
+      "limit": 0.001,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "touches nothing it shouldn't"
+    },
+    {
+      "name": "clearance.cap-SW2",
+      "value": 0.2,
+      "limit": 0.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "nearest part SW2"
+    },
+    {
+      "name": "edge_gap",
+      "value": 0.2957,
+      "limit": 0.29,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "the PCB's edge to the tray's inner wall"
+    },
+    {
+      "name": "opening.J1",
+      "value": 0.25,
+      "limit": 0.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "bottom wall; the part's outline 8.94 × 3.30 mm inside a 9.54 × 3.86 mm cutout, 0.25 mm to spare"
+    },
+    {
+      "name": "usb_setback.J1",
+      "value": 1.15,
+      "limit": 2.0,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "receptacle mouth behind the case's outer face at the plug recess (limit INFERRED)"
+    },
+    {
+      "name": "opening.J2",
+      "value": 0.295,
+      "limit": 0.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "right wall; the part's outline 6.00 × 2.96 mm inside a 6.60 × 3.55 mm cutout, 0.29 mm to spare"
+    },
+    {
+      "name": "opening.SW2",
+      "value": 0.0005,
+      "limit": 0.2,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "opening centre 0.001 mm from SW2's 3D body centre"
+    },
+    {
+      "name": "opening.SW1",
+      "value": 0.0005,
+      "limit": 0.2,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "opening centre 0.001 mm from SW1's 3D body centre"
+    },
+    {
+      "name": "opening.D1",
+      "value": 0.0,
+      "limit": 0.2,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "opening centre 0.000 mm from D1's 3D body centre"
+    },
+    {
+      "name": "opening.D2",
+      "value": 0.0,
+      "limit": 0.2,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "opening centre 0.000 mm from D2's 3D body centre"
+    },
+    {
+      "name": "opening.U4",
+      "value": 0.0,
+      "limit": 0.2,
+      "cmp": "<=",
+      "ok": true,
+      "detail": "opening centre 0.000 mm from U4's 3D body centre"
+    },
+    {
+      "name": "cap_travel.SW2",
+      "value": 0.25,
+      "limit": 0.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "pressed 0.45 mm (gap 0.20 + travel 0.25): presses the actuator (yes), overlaps nothing else (0.000 mm³), stands 0.55 mm above the lid; value: pressed cap to anything else"
+    },
+    {
+      "name": "print.wall",
+      "value": 1.5,
+      "limit": 1.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "side wall (resin)"
+    },
+    {
+      "name": "print.floor",
+      "value": 1.5,
+      "limit": 1.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "tray floor and lid plate"
+    },
+    {
+      "name": "print.boss_wall",
+      "value": 1.5,
+      "limit": 1.5,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "thinnest: standoff foot around the screw head"
+    },
+    {
+      "name": "print.tube_wall",
+      "value": 1.2,
+      "limit": 1.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "SW1 guide tube"
+    },
+    {
+      "name": "print.holes",
+      "value": 1.2,
+      "limit": 1.0,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "smallest: U4 vent slots"
+    },
+    {
+      "name": "print.skin",
+      "value": 0.8,
+      "limit": 0.8,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "thinnest: J1 wall left at the plug recess"
+    },
+    {
+      "name": "print.part_size",
+      "value": 5.051,
+      "limit": 5.0,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "smallest part: cap-SW2"
+    },
+    {
+      "name": "boss_in_courtyard.H3",
+      "value": 0.7369,
+      "limit": 0.0,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "boss Ø5.40 inside H3's courtyard (radius 3.4369)"
+    },
+    {
+      "name": "boss_in_courtyard.H1",
+      "value": 0.7369,
+      "limit": 0.0,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "boss Ø5.40 inside H1's courtyard (radius 3.4369)"
+    },
+    {
+      "name": "boss_in_courtyard.H2",
+      "value": 0.7369,
+      "limit": 0.0,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "boss Ø5.40 inside H2's courtyard (radius 3.4369)"
+    },
+    {
+      "name": "boss_in_courtyard.H4",
+      "value": 0.7369,
+      "limit": 0.0,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "boss Ø5.40 inside H4's courtyard (radius 3.4369)"
+    },
+    {
+      "name": "screw_length",
+      "value": 4.0,
+      "limit": 4.0,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "4 × M2 × 8 mm self-tapping screws for plastic; thread in the lid boss (mm)"
+    },
+    {
+      "name": "screw_through_pcb",
+      "value": 1.2,
+      "limit": 0.2,
+      "cmp": ">=",
+      "ok": true,
+      "detail": "M2 through the Ø3.2 mounting holes"
+    }
+  ],
+  "clearance": [
+    {
+      "part": "tray",
+      "min_mm": 0.3,
+      "nearest": "U1"
+    },
+    {
+      "part": "lid",
+      "min_mm": 0.3,
+      "nearest": "U1"
+    },
+    {
+      "part": "cap-SW2",
+      "min_mm": 0.2,
+      "nearest": "SW2"
+    }
+  ],
+  "openings": [
+    {
+      "ref": "J1",
+      "kind": "usb_c",
+      "ok": true,
+      "detail": "bottom wall; the part's outline 8.94 × 3.30 mm inside a 9.54 × 3.86 mm cutout, 0.25 mm to spare"
+    },
+    {
+      "ref": "J2",
+      "kind": "connector",
+      "ok": true,
+      "detail": "right wall; the part's outline 6.00 × 2.96 mm inside a 6.60 × 3.55 mm cutout, 0.29 mm to spare"
+    },
+    {
+      "ref": "SW2",
+      "kind": "button",
+      "ok": true,
+      "detail": "opening centre 0.001 mm from SW2's 3D body centre; pressed 0.45 mm (gap 0.20 + travel 0.25): presses the actuator (yes), overlaps nothing else (0.000 mm³), stands 0.55 mm above the lid"
+    },
+    {
+      "ref": "SW1",
+      "kind": "pinhole",
+      "ok": true,
+      "detail": "opening centre 0.001 mm from SW1's 3D body centre"
+    },
+    {
+      "ref": "D1",
+      "kind": "led",
+      "ok": true,
+      "detail": "opening centre 0.000 mm from D1's 3D body centre"
+    },
+    {
+      "ref": "D2",
+      "kind": "led",
+      "ok": true,
+      "detail": "opening centre 0.000 mm from D2's 3D body centre"
+    },
+    {
+      "ref": "U4",
+      "kind": "vent",
+      "ok": true,
+      "detail": "opening centre 0.000 mm from U4's 3D body centre"
+    }
+  ],
+  "parts": [
+    {
+      "name": "case-bottom",
+      "step": "case-bottom.step",
+      "stl": "case-bottom.stl",
+      "volume_mm3": 5818.5,
+      "size_mm": [
+        53.6,
+        53.6,
+        6.1
+      ]
+    },
+    {
+      "name": "case-lid",
+      "step": "case-lid.step",
+      "stl": "case-lid.stl",
+      "volume_mm3": 5785.9,
+      "size_mm": [
+        53.6,
+        53.6,
+        5.75
+      ]
+    },
+    {
+      "name": "cap-SW2",
+      "step": "cap-SW2.step",
+      "stl": "cap-SW2.stl",
+      "volume_mm3": 83.8,
+      "size_mm": [
+        7.0,
+        7.0,
+        5.05
+      ]
+    }
+  ],
+  "screw": {
+    "size": "M2",
+    "length_mm": 8,
+    "count": 4,
+    "engagement_mm": 4.0
+  },
+  "renders": [
+    "case-iso.png",
+    "case-exploded.png",
+    "case-top.png"
+  ],
+  "files": [
+    "case-bottom.step",
+    "case-bottom.stl",
+    "case-lid.step",
+    "case-lid.stl",
+    "cap-SW2.step",
+    "cap-SW2.stl",
+    "case-iso.png",
+    "case-exploded.png",
+    "case-top.png",
+    "fit.json"
+  ],
+  "problems": []
+}

@@ -10,6 +10,8 @@
 //! [firmware]       self_test = ["sht40"]
 //! [[sim.wokwi_step]] wait = "SELFTEST_PRESS boot_button"; press = "BOOT"
 //! [provision]      gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
+//! [case]           material = "resin"; wall = 1.5; screw = "M3"
+//! [[case.opening]] ref = "J1"; kind = "usb_c"
 //! ```
 //!
 //! `gate` checks it against the circuit and the board's `spec.md`; `header` turns it into
@@ -20,7 +22,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::circuit::Circuit;
 
@@ -48,6 +50,301 @@ pub struct BoardFile {
     /// the repo (D-025).
     #[serde(default)]
     pub provision: BTreeMap<String, String>,
+    /// The printed case (D-025 Phase B), built and fit-checked by the `case` stage; None: no case.
+    pub case: Option<Case>,
+}
+
+/// `[case]`: a two-part printed shell (bottom tray + lid) around the board, made by
+/// `enclosure/case.py` from `case/board.json` (the `case` stage, `crate::case`). mm throughout.
+/// Printing rules are JLC3DP's design guide (research/2026-09-29-enclosure-tooling.md §3).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Case {
+    /// Sets the minimum wall, hole and skin (`Material::limits`).
+    pub material: Material,
+    /// Side wall.
+    #[serde(default = "d1_5")]
+    pub wall: f64,
+    /// Floor of the tray and top plate of the lid.
+    #[serde(default = "d1_5")]
+    pub floor: f64,
+    /// PCB edge to the inner wall (static fit 0.2 + print tolerance).
+    #[serde(default = "d0_3")]
+    pub edge_gap: f64,
+    /// Tallest top-side part to the lid's underside.
+    #[serde(default = "d1_0")]
+    pub top_gap: f64,
+    /// PCB underside to the floor: the standoff height.
+    #[serde(default = "d3_0")]
+    pub bottom_gap: f64,
+    /// Fit gate: every case solid to every part solid, except intended contacts.
+    #[serde(default = "d0_2")]
+    pub min_clearance: f64,
+    /// Self-tapping screw for plastic: from below through a standoff and the PCB's mounting
+    /// hole into a boss in the lid.
+    #[serde(default)]
+    pub screw: Screw,
+    #[serde(rename = "opening", default)]
+    pub openings: Vec<Opening>,
+}
+
+fn d0_2() -> f64 {
+    0.2
+}
+fn d0_3() -> f64 {
+    0.3
+}
+fn d1_0() -> f64 {
+    1.0
+}
+fn d1_5() -> f64 {
+    1.5
+}
+fn d3_0() -> f64 {
+    3.0
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Material {
+    /// SLA, JLC3DP 9600 white resin: cheapest, finest; brittle (no snap arms), translucent.
+    Resin,
+    /// MJF PA12 nylon: tough, black or grey.
+    Nylon,
+}
+
+/// A material's printing limits, mm (JLC3DP design guide, VERIFIED 2026-09-29, unless noted).
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Limits {
+    /// Side wall and floor: resin 1.2 (the upload checker's "wall thickness > 1.2 mm"),
+    /// nylon 1.5 (the guide's 50 × 50 mm row).
+    pub wall_min: f64,
+    /// Smallest hole: SLA Ø1.0, others Ø1.5.
+    pub hole_min: f64,
+    /// Bosses, snaps and fasteners: "more than 1.5 mm".
+    pub boss_wall_min: f64,
+    /// Thinnest local skin (LED window, the wall left at the USB-C recess): resin 0.8 (the
+    /// upload checker's "thinnest part ≥ 0.8 mm"), nylon 1.0 (PA12-HP's datasheet wall).
+    pub skin_min: f64,
+    /// Static fit clearance per side (resin 0.2; nylon 0.2-0.4).
+    pub static_fit: f64,
+    /// Moving fit clearance per side (resin 0.5, nylon 0.6): the button cap in its hole.
+    pub moving_fit: f64,
+    /// Smallest printable part in each axis (SLA/MJF 5 × 5 × 5).
+    pub part_min: f64,
+}
+
+impl Material {
+    pub fn limits(self) -> Limits {
+        match self {
+            Material::Resin => Limits { wall_min: 1.2, hole_min: 1.0, boss_wall_min: 1.5, skin_min: 0.8, static_fit: 0.2, moving_fit: 0.5, part_min: 5.0 },
+            Material::Nylon => Limits { wall_min: 1.5, hole_min: 1.5, boss_wall_min: 1.5, skin_min: 1.0, static_fit: 0.2, moving_fit: 0.6, part_min: 5.0 },
+        }
+    }
+}
+
+/// Self-tapping (thread-forming) screws for plastic, by nominal size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub enum Screw {
+    M2,
+    #[serde(rename = "M2.5")]
+    M2_5,
+    #[default]
+    M3,
+}
+
+/// A screw's holes, mm. Pilot ≈ 0.8-0.85 × d for thread-forming screws into plastic and pan
+/// head sizes from ISO 7045 (INFERRED: common vendor tables, not checked against the screws
+/// that will be bought).
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ScrewHoles {
+    pub size: Screw,
+    pub d: f64,
+    /// Hole in the lid boss the screw cuts its thread into.
+    pub pilot: f64,
+    /// Hole the screw passes through (standoff).
+    pub clearance: f64,
+    pub head_d: f64,
+    pub head_h: f64,
+}
+
+impl Screw {
+    pub fn holes(self) -> ScrewHoles {
+        let (d, pilot, clearance, head_d, head_h) = match self {
+            Screw::M2 => (2.0, 1.7, 2.4, 4.0, 1.6),
+            Screw::M2_5 => (2.5, 2.1, 2.9, 5.0, 2.0),
+            Screw::M3 => (3.0, 2.5, 3.4, 5.6, 2.4),
+        };
+        ScrewHoles { size: self, d, pilot, clearance, head_d, head_h }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpeningKind {
+    /// Wall cutout around a USB-C receptacle's mouth, plus an outer recess for the plug.
+    UsbC,
+    /// Wall cutout around a connector's mouth (JST, Qwiic).
+    Connector,
+    /// Lid hole over a tactile switch, with a separate printed cap (plunger).
+    Button,
+    /// Small lid hole over a switch (reset), with a guide tube for a paper clip.
+    Pinhole,
+    /// A LED seen through the lid: a thin window (resin) or a hole.
+    Led,
+    /// Slots in the lid over a part that must see outside air (humidity sensor).
+    Vent,
+}
+
+impl OpeningKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OpeningKind::UsbC => "usb_c",
+            OpeningKind::Connector => "connector",
+            OpeningKind::Button => "button",
+            OpeningKind::Pinhole => "pinhole",
+            OpeningKind::Led => "led",
+            OpeningKind::Vent => "vent",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LedStyle {
+    /// A pocket from inside, leaving the material's thinnest skin (resin glows through it).
+    Window,
+    /// A hole through the lid.
+    Hole,
+}
+
+/// `[[case.opening]]`: what the case must let through for one part. Only `ref` and `kind` are
+/// needed; the rest override the kind's defaults (`Opening::resolved`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Opening {
+    #[serde(rename = "ref")]
+    pub reference: String,
+    pub kind: OpeningKind,
+    /// usb_c, connector: gap around the mouth, per side (0.3).
+    pub margin: Option<f64>,
+    /// usb_c, connector: the mouth's height above the PCB (usb_c 3.26, INFERRED from the HRO
+    /// model; a connector must give its datasheet value).
+    pub height: Option<f64>,
+    /// button: the cap's diameter (4.0); pinhole: the hole (1.4); led: the window pocket (3.0)
+    /// or the hole (2.0).
+    pub diameter: Option<f64>,
+    /// led: window (default) or hole.
+    pub style: Option<LedStyle>,
+    /// button: the switch's travel (0.25, INFERRED: typical for small tactile switches).
+    pub travel: Option<f64>,
+    /// vent: number of slots (3), their width (1.2) and length (5.0).
+    pub slots: Option<u32>,
+    pub slot_width: Option<f64>,
+    pub slot_length: Option<f64>,
+}
+
+/// An opening with every value its kind uses filled in (written to `case/board.json`).
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedOpening {
+    #[serde(rename = "ref")]
+    pub reference: String,
+    pub kind: OpeningKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diameter: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<LedStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub travel: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slots: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_width: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_length: Option<f64>,
+}
+
+impl Opening {
+    /// The keys (besides ref and kind) this kind uses.
+    fn keys(kind: OpeningKind) -> &'static [&'static str] {
+        match kind {
+            OpeningKind::UsbC | OpeningKind::Connector => &["margin", "height"],
+            OpeningKind::Button => &["diameter", "travel"],
+            OpeningKind::Pinhole => &["diameter"],
+            OpeningKind::Led => &["style", "diameter"],
+            OpeningKind::Vent => &["slots", "slot_width", "slot_length"],
+        }
+    }
+
+    /// The keys given in board.toml.
+    fn given(&self) -> Vec<&'static str> {
+        let o = self;
+        [
+            ("margin", o.margin.is_some()),
+            ("height", o.height.is_some()),
+            ("diameter", o.diameter.is_some()),
+            ("style", o.style.is_some()),
+            ("travel", o.travel.is_some()),
+            ("slots", o.slots.is_some()),
+            ("slot_width", o.slot_width.is_some()),
+            ("slot_length", o.slot_length.is_some()),
+        ]
+        .into_iter()
+        .filter(|x| x.1)
+        .map(|x| x.0)
+        .collect()
+    }
+
+    pub fn resolved(&self) -> ResolvedOpening {
+        use OpeningKind::*;
+        let k = self.kind;
+        let style = (k == Led).then(|| self.style.unwrap_or(LedStyle::Window));
+        let diameter = match k {
+            Button => Some(self.diameter.unwrap_or(4.0)),
+            Pinhole => Some(self.diameter.unwrap_or(1.4)),
+            Led => Some(self.diameter.unwrap_or(if style == Some(LedStyle::Hole) { 2.0 } else { 3.0 })),
+            _ => None,
+        };
+        ResolvedOpening {
+            reference: self.reference.clone(),
+            kind: k,
+            margin: matches!(k, UsbC | Connector).then(|| self.margin.unwrap_or(0.3)),
+            height: match k {
+                UsbC => Some(self.height.unwrap_or(3.26)),
+                Connector => self.height,
+                _ => None,
+            },
+            diameter,
+            style,
+            travel: (k == Button).then(|| self.travel.unwrap_or(0.25)),
+            slots: (k == Vent).then(|| self.slots.unwrap_or(3)),
+            slot_width: (k == Vent).then(|| self.slot_width.unwrap_or(1.2)),
+            slot_length: (k == Vent).then(|| self.slot_length.unwrap_or(5.0)),
+        }
+    }
+}
+
+impl Case {
+    /// The table as `case/board.json` carries it: defaults filled, the material's limits and
+    /// the screw's holes spelled out, so `enclosure/case.py` has one source of numbers.
+    pub fn resolved(&self) -> serde_json::Value {
+        serde_json::json!({
+            "material": self.material,
+            "limits": self.material.limits(),
+            "wall": self.wall,
+            "floor": self.floor,
+            "edge_gap": self.edge_gap,
+            "top_gap": self.top_gap,
+            "bottom_gap": self.bottom_gap,
+            "min_clearance": self.min_clearance,
+            "screw": self.screw.holes(),
+            "openings": self.openings.iter().map(Opening::resolved).collect::<Vec<_>>(),
+        })
+    }
 }
 
 /// Simulation settings (D-025). QEMU needs none; Wokwi needs the parts on the pins (`PinMap::sim`)
@@ -383,7 +680,10 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
         }
     }
     p.extend(sim_problems(bf));
-    let key = Regex::new(r"^[a-z0-9_]{1,15}$").unwrap();
+    if let Some(case) = &bf.case {
+        p.extend(case_problems(case, c));
+    }
+    let key =Regex::new(r"^[a-z0-9_]{1,15}$").unwrap();
     for (k, v) in &bf.provision {
         if !key.is_match(k) {
             p.push(format!("provision key {k:?}: NVS keys are [a-z0-9_], at most 15 characters"));
@@ -451,6 +751,71 @@ fn sim_problems(bf: &BoardFile) -> Vec<String> {
                 }
             }
             _ => p.push(format!("{at}: needs exactly one of press or expect")),
+        }
+    }
+    p
+}
+
+/// `[case]` against the material's printing limits and the circuit's parts. What only the 3D
+/// shapes can show (clearances, alignment) is the `case` stage's fit gate.
+fn case_problems(case: &Case, c: &Circuit) -> Vec<String> {
+    let mut p = vec![];
+    let lim = case.material.limits();
+    let m = match case.material {
+        Material::Resin => "resin",
+        Material::Nylon => "nylon",
+    };
+    let num = |v: f64| v.is_finite() && v >= 0.0;
+    for (key, v, min) in [
+        ("wall", case.wall, lim.wall_min),
+        ("floor", case.floor, lim.wall_min),
+        ("edge_gap", case.edge_gap, lim.static_fit),
+        ("min_clearance", case.min_clearance, 0.0),
+        ("top_gap", case.top_gap, case.min_clearance),
+        ("bottom_gap", case.bottom_gap, case.min_clearance),
+    ] {
+        if !num(v) || v < min {
+            p.push(format!("case.{key} = {v} mm is under the minimum {min} mm ({m})"));
+        }
+    }
+    let mut seen = HashSet::new();
+    for o in &case.openings {
+        let at = format!("case.opening {}", o.reference);
+        if c.find_part(&o.reference).is_none() {
+            p.push(format!("{at}: no such part in the circuit"));
+        }
+        if !seen.insert(o.reference.as_str()) {
+            p.push(format!("{at}: listed twice"));
+        }
+        let allowed = Opening::keys(o.kind);
+        for k in o.given() {
+            if !allowed.contains(&k) {
+                p.push(format!("{at}: {k} is not used by a {} opening (it takes {})", o.kind.as_str(), allowed.join(", ")));
+            }
+        }
+        let r = o.resolved();
+        if o.kind == OpeningKind::Connector && r.height.is_none() {
+            p.push(format!("{at}: a connector needs height (its mouth's height above the PCB, from the datasheet)"));
+        }
+        for (k, v) in [("margin", r.margin), ("height", r.height), ("diameter", r.diameter), ("travel", r.travel), ("slot_width", r.slot_width), ("slot_length", r.slot_length)] {
+            if v.is_some_and(|v| !(v.is_finite() && v > 0.0)) {
+                p.push(format!("{at}: {k} must be more than 0"));
+            }
+        }
+        if r.margin.is_some_and(|v| v < lim.static_fit) {
+            p.push(format!("{at}: margin {} mm is under the static fit {} mm ({m})", r.margin.unwrap(), lim.static_fit));
+        }
+        if r.slots == Some(0) {
+            p.push(format!("{at}: slots must be at least 1"));
+        }
+        // holes through the case: the pinhole, a LED hole, the vent slots
+        let hole = match (o.kind, r.style) {
+            (OpeningKind::Pinhole, _) | (OpeningKind::Led, Some(LedStyle::Hole)) => r.diameter,
+            (OpeningKind::Vent, _) => r.slot_width,
+            _ => None,
+        };
+        if let Some(h) = hole.filter(|&h| h < lim.hole_min) {
+            p.push(format!("{at}: a {h} mm hole is under the smallest printable hole {} mm ({m})", lim.hole_min));
         }
     }
     p
@@ -633,6 +998,77 @@ self_test = ["sensor"]
         assert!(with("wifi_pass = \"hunter2\"")[0].contains("must be \"prompt\""));
         assert!(with("file = \"file:x\"")[0].contains("file:<path>#<field>"));
         assert!(with("a_key_that_is_too_long = \"prompt\"")[0].contains("at most 15"));
+    }
+
+    const CASE: &str = r#"
+[case]
+material = "resin"
+wall = 1.5
+
+[[case.opening]]
+ref = "U1"
+kind = "usb_c"
+
+[[case.opening]]
+ref = "R1"
+kind = "led"
+style = "hole"
+"#;
+
+    #[test]
+    fn case_parses_resolves_and_passes() {
+        let text = format!("{SAMPLE}{CASE}");
+        assert_eq!(run(&text, &circuit()), Vec::<String>::new());
+        let case = parse(&text).unwrap().case.unwrap();
+        assert_eq!((case.floor, case.edge_gap, case.top_gap, case.bottom_gap, case.min_clearance), (1.5, 0.3, 1.0, 3.0, 0.2));
+        assert_eq!(case.screw, Screw::M3);
+        let r = case.resolved();
+        assert_eq!(r["material"], "resin");
+        assert_eq!(r["limits"]["hole_min"], 1.0);
+        assert_eq!(r["screw"]["size"], "M3");
+        assert_eq!(r["screw"]["pilot"], 2.5);
+        let usb = &r["openings"][0];
+        assert_eq!((usb["ref"].as_str(), usb["kind"].as_str()), (Some("U1"), Some("usb_c")));
+        assert_eq!((usb["margin"].as_f64(), usb["height"].as_f64()), (Some(0.3), Some(3.26)));
+        assert!(usb.get("diameter").is_none(), "{usb}");
+        let led = &r["openings"][1];
+        assert_eq!((led["style"].as_str(), led["diameter"].as_f64()), (Some("hole"), Some(2.0)));
+        // no [case]: nothing about a case
+        assert!(parse(SAMPLE).unwrap().case.is_none());
+        // unknown kinds, materials, screws and keys don't parse
+        assert!(parse(&text.replace("kind = \"usb_c\"", "kind = \"hdmi\"")).is_err());
+        assert!(parse(&text.replace("\"resin\"", "\"wood\"")).is_err());
+        assert!(parse(&text.replace("wall = 1.5", "wall = 1.5\nscrew = \"M4\"")).is_err());
+        assert!(parse(&text.replace("wall = 1.5", "wall = 1.5\nwal = 1.5")).is_err());
+        assert!(parse(&text.replace("style = \"hole\"", "style = \"hole\"\ncolour = \"red\"")).is_err());
+        assert_eq!(parse(&text.replace("wall = 1.5", "wall = 1.5\nscrew = \"M2.5\"")).unwrap().case.unwrap().screw, Screw::M2_5);
+    }
+
+    #[test]
+    fn case_errors() {
+        let base = format!("{SAMPLE}{CASE}");
+        let bad = |from: &str, to: &str, want: &str| {
+            assert!(base.contains(from), "{from:?} not in the case sample");
+            let p = run(&base.replacen(from, to, 1), &circuit());
+            assert!(p.len() == 1 && p[0].contains(want), "{from:?} -> {to:?}: want {want:?}, got {p:?}");
+        };
+        bad("wall = 1.5", "wall = 1.0", "case.wall = 1 mm is under the minimum 1.2 mm (resin)");
+        bad("material = \"resin\"", "material = \"nylon\"\nfloor = 1.2", "case.floor = 1.2 mm is under the minimum 1.5 mm (nylon)");
+        bad("wall = 1.5", "wall = 1.5\nedge_gap = 0.1", "case.edge_gap");
+        bad("wall = 1.5", "wall = 1.5\ntop_gap = 0.1", "case.top_gap");
+        bad("wall = 1.5", "wall = 1.5\nbottom_gap = -1", "case.bottom_gap");
+        bad("ref = \"U1\"", "ref = \"J9\"", "case.opening J9: no such part");
+        bad("ref = \"R1\"", "ref = \"U1\"", "case.opening U1: listed twice");
+        bad("kind = \"usb_c\"", "kind = \"usb_c\"\ntravel = 0.3", "travel is not used by a usb_c opening (it takes margin, height)");
+        bad("kind = \"usb_c\"", "kind = \"connector\"", "a connector needs height");
+        bad("kind = \"usb_c\"", "kind = \"usb_c\"\nmargin = 0.1", "margin 0.1 mm is under the static fit 0.2 mm");
+        bad("style = \"hole\"", "style = \"hole\"\ndiameter = 0.8", "a 0.8 mm hole is under the smallest printable hole 1 mm (resin)");
+        bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"pinhole\"\ndiameter = 0.9", "a 0.9 mm hole");
+        bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"vent\"\nslots = 0", "slots must be at least 1");
+        bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"vent\"\nslot_width = 0.5", "a 0.5 mm hole");
+        bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"button\"\ntravel = 0", "travel must be more than 0");
+        // a LED window is a pocket, not a hole: a small one is fine
+        assert_eq!(run(&base.replace("style = \"hole\"", "diameter = 0.8"), &circuit()), Vec::<String>::new());
     }
 
     #[test]

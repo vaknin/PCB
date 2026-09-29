@@ -167,3 +167,44 @@ level = 1
 [[sim.wokwi_step]]
 wait = "SELFTEST_PRESS boot_button"
 press = "BOOT"
+
+# The printed case (D-025 Phase B; the `case` stage builds and fit-checks it into case/).
+# White resin; the four M3 corner holes take self-tapping screws from below.
+[case]
+material = "resin"
+wall = 1.5
+floor = 1.5
+edge_gap = 0.3
+top_gap = 1.0
+bottom_gap = 3.0
+min_clearance = 0.2
+screw = "M2"            # M3 needs 6 mm of thread in the lid, which is only ~4.6 mm tall inside
+
+[[case.opening]]
+ref = "J1"            # USB-C
+kind = "usb_c"
+
+[[case.opening]]
+ref = "J2"            # Qwiic (JST SH 4-pin)
+kind = "connector"
+height = 2.95         # SM04B-SRSS-TB body height; INFERRED from KiCad's 3D model (2.97), datasheet not re-read
+
+[[case.opening]]
+ref = "SW2"           # BOOT: a printed cap to press
+kind = "button"
+
+[[case.opening]]
+ref = "SW1"           # RESET: a pinhole for a paper clip
+kind = "pinhole"
+
+[[case.opening]]
+ref = "D1"            # power light
+kind = "led"
+
+[[case.opening]]
+ref = "D2"            # status light
+kind = "led"
+
+[[case.opening]]
+ref = "U4"            # SHT40: must see outside air
+kind = "vent"

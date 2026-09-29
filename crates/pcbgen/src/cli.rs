@@ -1,5 +1,5 @@
 //! Pipeline driver, called by each board's `main`:
-//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [cost] [review] [--out DIR] [--tries N] [--wokwi]`
+//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [case] [cost] [review] [--out DIR] [--tries N] [--wokwi]`
 //!
 //! Stages run in this order whatever order they are named in (default: all). Generated
 //! KiCad files go to `<board>/kicad/` and fab files to `<board>/fab/`; `--out DIR` puts
@@ -9,9 +9,10 @@
 //! A board with a `board.toml` (D-023) gets the BOARD.TOML gate in `sch`, `check` and `fw`;
 //! `fw` writes the firmware's pin header to `<board>/firmware/board_pins.h`, and the Wokwi
 //! files (`diagram.json`, `wokwi.toml`, the scenario) when a pin has a `sim` part.
-//! `sim` (the firmware in QEMU, plus Wokwi with `--wokwi`; D-025), `cost` (live JLCPCB
-//! prices, needs the network) and `review` (the owner's review page,
-//! `<board>/review/index.html`) run only when named.
+//! `sim` (the firmware in QEMU, plus Wokwi with `--wokwi`; D-025), `case` (the printed case
+//! and its fit check, `<board>/case/`; D-025 Phase B), `cost` (live JLCPCB prices, needs the
+//! network) and `review` (the owner's review page, `<board>/review/index.html`) run only when
+//! named.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -21,9 +22,9 @@ use anyhow::{Result, bail};
 use crate::circuit::Circuit;
 use crate::layout::Layout;
 use crate::sexpr::Sexp;
-use crate::{boardfile, cost, fab, gates, pcb, project, report, review, route, schematic, sim, wokwi};
+use crate::{boardfile, case, cost, fab, gates, pcb, project, report, review, route, schematic, sim, wokwi};
 
-pub const STAGES: [&str; 9] = ["sch", "pcb", "route", "check", "fab", "fw", "sim", "cost", "review"];
+pub const STAGES: [&str; 10] = ["sch", "pcb", "route", "check", "fab", "fw", "sim", "case", "cost", "review"];
 /// What runs when no stage is named: everything that builds and checks the design.
 pub const DEFAULT: usize = 6;
 
@@ -172,6 +173,13 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
         // builds the board's own firmware project; results go next to the --out header
         let ok = sim::run(bf, &board.dir.join("firmware"), &base.join("firmware"), &sim::Options { wokwi })?;
         if !ok {
+            return Ok(false);
+        }
+    }
+    if want("case") {
+        let Some(bf) = &board_file else { bail!("case needs a board.toml with a [case] table") };
+        // [case] is part of the BOARD.TOML gate: check it before building anything
+        if !board_toml(&circuit)? || !case::run(bf, &pcb_path, &base)? {
             return Ok(false);
         }
     }

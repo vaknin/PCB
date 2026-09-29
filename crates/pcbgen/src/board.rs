@@ -106,6 +106,8 @@ pub struct Footprint {
     pub pads: Vec<Pad>,
     /// Closed courtyard outlines, absolute, both sides.
     pub courtyards: Vec<Vec<Pt>>,
+    /// Closed fabrication-layer outlines (F.Fab and B.Fab: the part's body), absolute.
+    pub fab: Vec<Vec<Pt>>,
     pub keepouts: Vec<RuleArea>,
 }
 
@@ -308,6 +310,8 @@ impl Footprint {
         }
         let mut courtyards = shapes_on(n, "fp_", "F.CrtYd", &to_abs);
         courtyards.extend(shapes_on(n, "fp_", "B.CrtYd", &to_abs));
+        let mut fab = shapes_on(n, "fp_", "F.Fab", &to_abs);
+        fab.extend(shapes_on(n, "fp_", "B.Fab", &to_abs));
         // zones inside a footprint are stored in board coordinates already
         let keepouts = n.find_all("zone").filter_map(|z| rule_area(z, pts(z.find("polygon").and_then(|p| p.find("pts"))))).collect();
         Ok(Footprint {
@@ -319,6 +323,7 @@ impl Footprint {
             layer: n.get("layer").unwrap_or("F.Cu").to_string(),
             pads,
             courtyards,
+            fab,
             keepouts,
         })
     }

@@ -4,6 +4,7 @@
 
 pub mod board;
 pub mod boardfile;
+pub mod case;
 pub mod circuit;
 pub mod cli;
 pub mod cost;
