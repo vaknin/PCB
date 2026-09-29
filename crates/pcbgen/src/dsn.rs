@@ -133,12 +133,41 @@ fn padstack(pad: &Pad) -> Result<Option<(String, String)>> {
         }
         s => bail!("pad shape {s:?} is not supported by the DSN writer yet"),
     };
+    // a copper shape offset from the hole: every coordinate shifted, as KiCad's exporter
+    // does (its name carries the offset)
+    let (name, body) = if pad.offset == pt(0.0, 0.0) { (name, body) } else { (offset_name(&name, pad.offset), shift(&body, pad.offset)) };
     let mut out = String::new();
     for l in &layers {
         writeln!(out, "      (shape {})", body.replace("{L}", l))?;
     }
     out.push_str("      (attach off)\n");
     Ok(Some((name, out)))
+}
+
+/// "Oval[A]Pad_..." → "Oval[A][dx,dy]Pad_..." (µm, Y up), as KiCad names them.
+fn offset_name(name: &str, o: Pt) -> String {
+    match name.find(']') {
+        Some(i) => format!("{}[{},{}]{}", &name[..=i], um(o.x), um(-o.y), &name[i + 1..]),
+        None => name.to_string(),
+    }
+}
+
+/// A padstack shape body ("(kind {L} ...)") with its points shifted by `o` (pad frame,
+/// Y down). Circles gain the offset as their centre.
+fn shift(body: &str, o: Pt) -> String {
+    let (dx, dy) = (o.x * 1000.0, -o.y * 1000.0);
+    let inner = body.trim_start_matches('(').trim_end_matches(')');
+    let mut words = inner.split_whitespace();
+    let kind = words.next().unwrap_or("");
+    let layer = words.next().unwrap_or("");
+    let nums: Vec<f64> = words.filter_map(|w| w.parse().ok()).collect();
+    let pts = |v: &[f64]| v.chunks(2).map(|c| format!("{} {}", fmt_num(c[0] + dx), fmt_num(c[1] + dy))).collect::<Vec<_>>().join("  ");
+    match kind {
+        "circle" => format!("(circle {layer} {} {} {})", fmt_num(nums[0]), fmt_num(dx), fmt_num(dy)),
+        "rect" => format!("(rect {layer} {})", pts(&nums)),
+        // width (or 0 for a polygon), then points
+        _ => format!("({kind} {layer} {}  {})", fmt_num(nums[0]), pts(&nums[1..])),
+    }
 }
 
 /// Short stable hash of a padstack's shape text, to name padstacks that differ only in it.
@@ -183,6 +212,41 @@ pub fn pin_names(fp: &Footprint) -> Vec<Option<String>> {
         .collect()
 }
 
+/// A bottom-side footprint as the top-side one it was flipped from (its library shape),
+/// which is how KiCad's exporter writes the image of a part placed `back` (checked
+/// against `pcbnew.ExportSpecctraDSN`, 2026-09-29): footprint-frame Y negated back, pad
+/// angles negated, F.* and B.* swapped. Keep-outs stay in board coordinates, as the top
+/// footprint at the same place and angle would have them. Top-side footprints unchanged.
+fn front_view(fp: &Footprint) -> Footprint {
+    if fp.layer != "B.Cu" {
+        return fp.clone();
+    }
+    let my = |p: Pt| pt(p.x, -p.y);
+    let mut f = fp.clone();
+    for pad in &mut f.pads {
+        pad.local = my(pad.local);
+        pad.rel_angle = -pad.rel_angle;
+        pad.offset = my(pad.offset);
+        pad.angle = fp.rot + pad.rel_angle;
+        pad.pos = fp.pos + rotate(pad.local, fp.rot);
+        pad.layers = pad.layers.iter().map(|l| crate::footprint::flip_layer(l)).collect();
+        if let Some(poly) = &mut pad.poly {
+            let mirrored: Vec<Pt> = poly.iter().map(|q| my(*q)).collect();
+            // the library pad's own outline: a trapezoid's corners in reverse order, a
+            // custom pad's hull recomputed (same start point and winding as the top copy)
+            *poly = if pad.shape == "custom" { crate::geom::convex_hull(&mirrored) } else { mirrored.into_iter().rev().collect() };
+        }
+    }
+    let unflip = |p: Pt| fp.pos + rotate(my(rotate(p - fp.pos, -fp.rot)), fp.rot);
+    for k in &mut f.keepouts {
+        k.poly = k.poly.iter().map(|p| unflip(*p)).collect();
+        k.layers = k.layers.iter().map(|l| crate::footprint::flip_layer(l)).collect();
+    }
+    f.courtyards = fp.courtyards.iter().map(|c| c.iter().map(|p| unflip(*p)).collect()).collect();
+    f.layer = "F.Cu".into();
+    f
+}
+
 /// Footprint order for the DSN: file order for `seed` 0, else a shuffle seeded by it.
 ///
 /// Freerouting is deterministic: the same DSN gives the same routing, and the order of
@@ -207,7 +271,16 @@ fn footprint_order(n: usize, seed: u64) -> Vec<usize> {
 /// Write the DSN. Returns via padstack name → (diameter, drill) mm, to read the SES back.
 /// `seed` 0 keeps the board's footprint order; any other value shuffles it (retries).
 pub fn write(board: &Board, rules: &BoardRules, hole_clearance: f64, seed: u64, path: &std::path::Path) -> Result<HashMap<String, (f64, f64)>> {
-    let footprints: Vec<&Footprint> = footprint_order(board.footprints.len(), seed).into_iter().map(|i| &board.footprints[i]).collect();
+    // bottom-side parts as their top-side image, placed `back`
+    let fronts: Vec<(Footprint, bool)> = board.footprints.iter().map(|f| (front_view(f), f.layer == "B.Cu")).collect();
+    for f in &board.footprints {
+        if f.layer != "F.Cu" && f.layer != "B.Cu" {
+            bail!("{}: footprint on {} (not F.Cu or B.Cu)", f.reference, f.layer);
+        }
+    }
+    let order = footprint_order(board.footprints.len(), seed);
+    let footprints: Vec<&Footprint> = order.iter().map(|&i| &fronts[i].0).collect();
+    let back: Vec<bool> = order.iter().map(|&i| fronts[i].1).collect();
     let mut o = String::new();
     writeln!(o, "(pcb {}", q(&path.to_string_lossy()))?;
     o.push_str("  (parser\n    (string_quote \")\n    (space_in_quoted_tokens on)\n    (host_cad \"pcbgen\")\n    (host_version \"0.2\")\n  )\n");
@@ -249,9 +322,6 @@ pub fn write(board: &Board, rules: &BoardRules, hole_clearance: f64, seed: u64, 
     let mut images: Vec<(String, String)> = vec![]; // (name, body)
     let mut image_of: Vec<String> = vec![];
     for fp in &footprints {
-        if fp.layer != "F.Cu" {
-            bail!("{}: bottom-side footprints are not supported by the DSN writer yet", fp.reference);
-        }
         let mut body = String::new();
         for (pad, name) in fp.pads.iter().zip(pin_names(fp)) {
             let Some(name) = name else { continue };
@@ -263,7 +333,13 @@ pub fn write(board: &Board, rules: &BoardRules, hole_clearance: f64, seed: u64, 
             let rot = if rot == 0.0 { String::new() } else { format!(" (rotate {})", fmt_num(rot)) };
             writeln!(body, "      (pin {}{rot} {} {} {})", q(&ps), q_pin(&name), um(pad.local.x), um(-pad.local.y))?;
         }
-        let local = |p: Pt| rotate(p - fp.pos, -fp.rot);
+        // back to the footprint's frame, to 1 nm (as KiCad holds coordinates), so the
+        // round trip through board coordinates leaves no sub-nm noise in the image
+        let nm = |v: f64| (v * 1e6).round() / 1e6;
+        let local = |p: Pt| {
+            let q = rotate(p - fp.pos, -fp.rot);
+            pt(nm(q.x), nm(q.y))
+        };
         for k in &fp.keepouts {
             let Some(kind) = keepout_kind(k) else { continue };
             let poly: Vec<Pt> = closed(&k.poly).into_iter().map(local).collect();
@@ -293,9 +369,11 @@ pub fn write(board: &Board, rules: &BoardRules, hole_clearance: f64, seed: u64, 
     o.push_str("  (placement\n");
     for (img, _) in &images {
         writeln!(o, "    (component {}", q(img))?;
-        for (fp, _) in footprints.iter().zip(&image_of).filter(|(_, i)| *i == img) {
+        for ((fp, _), is_back) in footprints.iter().zip(&image_of).zip(&back).filter(|((_, i), _)| *i == img) {
             let p = fp.pos;
-            writeln!(o, "      (place {} {} front {} (PN {}))", q(&fp.reference), xy(p), fmt_num(norm180(fp.rot)), q(&fp.value))?;
+            // a back part: the image mirrored in X, then turned; KiCad writes its angle + 180
+            let (side, rot) = if *is_back { ("back", norm360(fp.rot + 180.0)) } else { ("front", norm180(fp.rot)) };
+            writeln!(o, "      (place {} {} {side} {} (PN {}))", q(&fp.reference), xy(p), fmt_num(rot), q(&fp.value))?;
         }
         o.push_str("    )\n");
     }
@@ -483,11 +561,63 @@ mod tests {
         assert_eq!(vias[&via_name(0.6, 0.3)], (0.6, 0.3));
     }
 
+    fn dsn_of(text: &str) -> String {
+        let b = Board::from_sexp(&parse(text).unwrap()).unwrap();
+        let rules = BoardRules { classes: vec![NetClass::new("Default", 0.2, 0.15, 0.6, 0.3)], ..Default::default() };
+        let dir = std::env::temp_dir().join(format!("pcbgen-dsn-back-{}-{}", std::process::id(), text.len()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.dsn");
+        write(&b, &rules, 0.25, 0, &path).unwrap();
+        let dsn = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        dsn
+    }
+
+    /// A bottom-side footprint is written as KiCad's exporter writes it (checked against
+    /// `pcbnew.ExportSpecctraDSN`): the image of the top-side footprint it was flipped
+    /// from, placed `back` at its angle + 180. So a flipped copy shares the image.
+    #[test]
+    fn bottom_parts_as_kicad() {
+        let module = parse(
+            r#"(footprint "Test:Two" (layer "F.Cu")
+  (property "Reference" "U1") (property "Value" "X")
+  (pad "1" smd rect (at -1 0.5 90) (size 1 0.5) (layers "F.Cu" "F.Mask") (net "GND"))
+  (pad "2" smd trapezoid (at 1 -0.5 30) (size 1 0.8) (rect_delta 0.2 0.3) (layers "F.Cu") (net "GND"))
+  (pad "3" thru_hole oval (at 0 1.5) (size 1.2 0.8) (drill oval 0.8 0.4 (offset 0.1 0.05)) (layers "*.Cu") (net "GND"))
+  (zone (layer "F.Cu") (keepout (tracks not_allowed) (vias not_allowed)) (polygon (pts (xy -1 -2) (xy 1 -2) (xy 1 -1)))))"#,
+        )
+        .unwrap();
+        let fp = |r: &str, side, x: f64, rot: f64| {
+            let mut f = crate::footprint::place(&module, "Test:Two", pt(x, 105.0), rot, side, "t", r).unwrap();
+            for p in f.items_mut().iter_mut().filter(|p| p.is("property") && p.arg(1) == Some("Reference")) {
+                p.items_mut()[2] = crate::sexpr::Sexp::Str(r.into());
+            }
+            crate::sexpr::dumps(&f)
+        };
+        let text = format!(
+            r#"(kicad_pcb (gr_rect (start 100 100) (end 130 110) (stroke (width 0.1)) (layer "Edge.Cuts")) {} {})"#,
+            fp("U1", crate::layout::Side::Top, 105.0, 90.0),
+            fp("U2", crate::layout::Side::Bottom, 120.0, 90.0)
+        );
+        let dsn = dsn_of(&text);
+        let has = |s: &str| assert!(dsn.contains(s), "missing {s:?} in\n{dsn}");
+        has("(place U1 105000 -105000 front 90 (PN X))");
+        has("(place U2 120000 -105000 back 270 (PN X))");
+        // one image for both: the library geometry, top-side layers
+        assert!(!dsn.contains("Test:Two::1"), "{dsn}");
+        has("(pin Rect[T]Pad_1000x500_um (rotate 90) 1 -1000 -500)");
+        has("(pin Trapz[T]Pad_1000x800_EC9F526E_um (rotate 30) 2 1000 500)");
+        // the copper offset from the hole (drill offset 0.1, 0.05; Y up)
+        has("(pin \"Oval[A][100,-50]Pad_1200x800_um\" 3 0 -1500)");
+        has("(padstack \"Oval[A][100,-50]Pad_1200x800_um\"\n      (shape (path F.Cu 800  -100 -50  300 -50))");
+        has("(keepout \"\" (polygon F.Cu 0  -1000 2000  1000 2000  1000 1000  -1000 2000))");
+    }
+
     #[test]
     fn refuses_what_it_cannot_write() {
-        let text = BOARD.replace("(footprint \"Test:Two\" (layer \"F.Cu\")", "(footprint \"Test:Two\" (layer \"B.Cu\")");
+        let text = BOARD.replace("(footprint \"Test:Two\" (layer \"F.Cu\")", "(footprint \"Test:Two\" (layer \"In1.Cu\")");
         let b = Board::from_sexp(&parse(&text).unwrap()).unwrap();
         let err = write(&b, &BoardRules::default(), 0.25, 0, &std::env::temp_dir().join("never.dsn")).unwrap_err();
-        assert!(err.to_string().contains("bottom-side"), "{err}");
+        assert!(err.to_string().contains("not F.Cu or B.Cu"), "{err}");
     }
 }

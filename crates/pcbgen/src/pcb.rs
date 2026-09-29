@@ -134,11 +134,14 @@ fn pour(board: &str, net: &str, layer: &str, name: &str, priority: u32, poly: Se
 /// the pad's outer end; the router then connects to its free end. Stubs are locked so
 /// the route stage keeps them.
 fn escape_stubs(fp: &Footprint, board: &str, reach: f64) -> Vec<Sexp> {
-    let keepouts: Vec<_> = fp.keepouts.iter().filter(|k| k.no_tracks).collect();
+    // the copper side the part sits on, and keep-outs on that side
+    let layer = fp.layer.as_str();
+    let keepouts: Vec<_> =
+        fp.keepouts.iter().filter(|k| k.no_tracks && k.layers.iter().any(|l| crate::board::layer_match(l, layer))).collect();
     let mut out = vec![];
     for pad in &fp.pads {
         let Some(net) = pad.net.as_deref() else { continue };
-        if !pad.on_layer("F.Cu") || net.starts_with("unconnected-") {
+        if !pad.on_layer(layer) || net.starts_with("unconnected-") {
             continue;
         }
         if !keepouts.iter().any(|k| collides(pad.pos, 0.2, &k.poly)) {
@@ -165,7 +168,7 @@ fn escape_stubs(fp: &Footprint, board: &str, reach: f64) -> Vec<Sexp> {
             node!("end", end.x, end.y),
             node!("width", width),
             node!("locked", true),
-            node!("layer", "F.Cu"),
+            node!("layer", layer),
             node!("net", net),
             node!("uuid", uid(board, &["stub", &fp.reference, &pad.number]))
         ));
@@ -200,11 +203,9 @@ pub fn build(project_dir: &Path, name: &str, spec: &BoardSpec, net_tree: &Sexp) 
             missing.push(reference);
             continue;
         };
-        if place.side == Side::Bottom {
-            bail!("{reference}: bottom-side placement is not supported yet");
-        }
         let rot = place.rot;
-        let mut fp = footprint::place(&module, fpid, board_pt(place.x, place.y), rot, name, &reference);
+        let mut fp = footprint::place(&module, fpid, board_pt(place.x, place.y), rot, place.side, name, &reference)
+            .map_err(|e| anyhow!("{reference}: {e:#}"))?;
 
         // fields: Reference, Value, then the symbol's fields (LCSC, MPN, ...) as pcbnew
         // adds them, hidden; the empty ones and Footprint are skipped
@@ -228,14 +229,14 @@ pub fn build(project_dir: &Path, name: &str, spec: &BoardSpec, net_tree: &Sexp) 
                 Some(p) => p.items_mut()[2] = Sexp::Str(v),
                 None => {
                     let at = fp.items().iter().rposition(|c| c.is("property")).map_or(2, |i| i + 1);
-                    fp.items_mut().insert(at, footprint::field(&k, &v, rot, name, &reference));
+                    fp.items_mut().insert(at, footprint::field(&k, &v, rot, place.side, name, &reference));
                 }
             }
         }
         if !spec.silk_refs.contains(&reference)
             && let Some(p) = fp.items_mut().iter_mut().find(|p| p.is("property") && p.arg(1) == Some("Reference"))
         {
-            p.set(node!("layer", "F.Fab"));
+            p.set(node!("layer", if place.side == Side::Bottom { "B.Fab" } else { "F.Fab" }));
         }
         // schematic link, sheet and BOM/DNP flags from the netlist
         let props: HashMap<&str, &str> = comp

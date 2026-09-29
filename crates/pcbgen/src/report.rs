@@ -41,22 +41,29 @@ pub fn build(project_dir: &Path, name: &str, rules: &BoardRules, gnd_net: &str) 
     let rel = |p: Pt| pt(p.x - ORIGIN.x, p.y - ORIGIN.y);
 
     // keep-outs: board-level rule areas and those inside footprints (antenna, sensor)
-    let mut keepouts: Vec<(String, &[Pt])> =
-        board.keepouts.iter().filter(|k| k.no_tracks).map(|k| (k.name.clone(), k.poly.as_slice())).collect();
+    // (name, layers, outline); a track counts only on the keep-out's own layers (a
+    // bottom-side part's keep-out is on B.Cu), a via on any
+    let mut keepouts: Vec<(String, &[String], &[Pt])> =
+        board.keepouts.iter().filter(|k| k.no_tracks).map(|k| (k.name.clone(), k.layers.as_slice(), k.poly.as_slice())).collect();
     for fp in &board.footprints {
-        keepouts.extend(fp.keepouts.iter().filter(|k| k.no_tracks).map(|k| ("(footprint)".to_string(), k.poly.as_slice())));
+        keepouts.extend(
+            fp.keepouts
+                .iter()
+                .filter(|k| k.no_tracks)
+                .map(|k| (format!("(footprint {})", fp.reference), k.layers.as_slice(), k.poly.as_slice())),
+        );
     }
     let mut in_keepout = vec![];
     for s in &board.segments {
-        for (kname, poly) in &keepouts {
-            if hits(s.start, s.end, s.width / 2.0, poly) {
+        for (kname, layers, poly) in &keepouts {
+            if layers.iter().any(|l| crate::board::layer_match(l, &s.layer)) && hits(s.start, s.end, s.width / 2.0, poly) {
                 let a = rel(s.start);
                 in_keepout.push(format!("track {} on {} at ({:.2}, {:.2}) in {kname}", s.net, s.layer, a.x, a.y));
             }
         }
     }
     for v in &board.vias {
-        for (kname, poly) in &keepouts {
+        for (kname, _, poly) in &keepouts {
             if hits(v.at, v.at, v.size / 2.0, poly) {
                 let a = rel(v.at);
                 in_keepout.push(format!("via {} at ({:.2}, {:.2}) in {kname}", v.net, a.x, a.y));

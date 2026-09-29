@@ -9,6 +9,11 @@
 //! kicad-jlcpcb-tools plugin downloads (matthewlai/JLCKicadTools cpl_rotations_db.csv,
 //! fetched 2026-09-29). A footprint with no entry is listed as UNVERIFIED in fab/README:
 //! check it in JLCPCB's placement preview before paying.
+//!
+//! Bottom side: the rotation is 180 − KiCad's angle, then the same correction added, as
+//! the kicad-jlcpcb-tools plugin does it (`_rotation_for_match` in its fabrication.py,
+//! read 2026-09-29; not from JLCPCB itself). Positions stay as seen from the top (the
+//! plugin's too). Every bottom-side part is listed UNVERIFIED for the preview check.
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -43,6 +48,14 @@ fn correction(footprint: &str) -> Option<i32> {
         }
     }
     Regex::new(NO_CORRECTION).unwrap().is_match(name).then_some(0)
+}
+
+/// JLCPCB's CPL rotation from KiCad's footprint angle and the package correction. The
+/// bottom side is mirrored first (180 − angle), as kicad-jlcpcb-tools does it: UNVERIFIED
+/// with JLCPCB.
+fn cpl_rotation(top: bool, kicad_rot: f64, corr: i32) -> f64 {
+    let base = if top { kicad_rot } else { 180.0 - kicad_rot };
+    (base + corr as f64).rem_euclid(360.0)
 }
 
 /// "R10" → ("R", 10), for sorting designators naturally.
@@ -134,20 +147,18 @@ pub fn export(project_dir: &Path, name: &str, c: &Circuit, out: &Path) -> Result
         let Some(part) = placed.iter().find(|p| p.reference == r) else { continue };
         let fp = &part.footprint;
         let short = fp.rsplit(':').next().unwrap_or("");
-        let corr = match correction(fp) {
-            Some(c) => c,
-            None => {
-                unverified.push(format!("{r} ({short})"));
-                0
-            }
-        };
         let side = row[c_side].to_lowercase();
-        if side != "top" && corr != 0 {
-            bail!("{r}: bottom-side rotation corrections are not handled");
+        let corr = correction(fp);
+        if corr.is_none() || side != "top" {
+            unverified.push(format!("{r} ({short}{})", if side == "top" { "" } else { ", bottom side" }));
         }
+        let corr = corr.unwrap_or(0);
         let krot: f64 = row[c_rot].parse()?;
-        let rot = (krot + corr as f64).rem_euclid(360.0);
-        if corr != 0 {
+        let top = side == "top";
+        let rot = cpl_rotation(top, krot, corr);
+        if !top {
+            notes.push(format!("{r} (bottom): 180 - KiCad {} deg + {corr} = {} deg", fmt_g(krot), fmt_g(rot)));
+        } else if corr != 0 {
             notes.push(format!("{r}: KiCad {} deg + {corr} = {} deg", fmt_g(krot), fmt_g(rot)));
         }
         let (x, y): (f64, f64) = (row[c_x].parse()?, row[c_y].parse()?);
@@ -201,7 +212,7 @@ fn readme(name: &str, n_parts: usize, skipped: &[&str], notes: &[String], unveri
     lines.extend(list(notes));
     lines.extend([
         String::new(),
-        "## Rotation UNVERIFIED (no known correction)".into(),
+        "## Rotation UNVERIFIED (no known correction, or bottom side)".into(),
         String::new(),
         "Check each of these in JLCPCB's placement preview (pin 1 marker) before paying.".into(),
         String::new(),
@@ -213,4 +224,20 @@ fn readme(name: &str, n_parts: usize, skipped: &[&str], notes: &[String], unveri
 /// CSV with CRLF line ends, as the Python pipeline wrote them (JLCPCB takes both).
 fn csv_writer(path: &Path) -> Result<csv::Writer<std::fs::File>> {
     Ok(csv::WriterBuilder::new().terminator(csv::Terminator::CRLF).from_path(path)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpl_rotations() {
+        assert_eq!(cpl_rotation(true, 90.0, 180), 270.0);
+        assert_eq!(cpl_rotation(true, 0.0, -90), 270.0);
+        // bottom: 180 - angle, then the correction (kicad-jlcpcb-tools)
+        assert_eq!(cpl_rotation(false, 0.0, 0), 180.0);
+        assert_eq!(cpl_rotation(false, 30.0, 0), 150.0);
+        assert_eq!(cpl_rotation(false, -90.0, -90), 180.0);
+        assert_eq!(cpl_rotation(false, 180.0, 0), 0.0);
+    }
 }

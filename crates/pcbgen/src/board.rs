@@ -41,6 +41,9 @@ pub struct Pad {
     /// anchor and primitives (conservative: it covers all the copper; Freerouting takes a
     /// padstack polygon's convex hull anyway).
     pub poly: Option<Vec<Pt>>,
+    /// Copper shape's offset from the hole (`(drill ... (offset x y))`), in the pad's own
+    /// frame; the pad's position is the hole's.
+    pub offset: Pt,
 }
 
 impl Pad {
@@ -61,7 +64,7 @@ impl Pad {
     /// Distance from `p` to the pad's copper (0 inside); custom pads by their convex hull.
     /// Chamfered corners count as rounded ones (covering more copper, so conservative).
     pub fn dist(&self, p: Pt) -> f64 {
-        let q = rotate(p - self.pos, -self.angle);
+        let q = rotate(p - self.pos, -self.angle) - self.offset;
         if let Some(poly) = &self.poly {
             return if inside(q, poly) { 0.0 } else { edge_dist(q, poly) };
         }
@@ -300,6 +303,7 @@ impl Footprint {
                 rratio: p.find("roundrect_rratio").map_or(0.0, |r| r.num(1)),
                 pos: to_abs(local),
                 poly: pad_outline(p, size)?,
+                offset: xy(p.find("drill").and_then(|d| d.find("offset"))),
             });
         }
         let mut courtyards = shapes_on(n, "fp_", "F.CrtYd", &to_abs);
@@ -485,6 +489,7 @@ mod tests {
             rratio,
             pos: pt(10.0, 10.0),
             poly: None,
+            offset: pt(0.0, 0.0),
         }
     }
 

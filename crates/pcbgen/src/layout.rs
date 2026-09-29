@@ -3,6 +3,10 @@
 //!
 //! Coordinates are mm from the board's top-left corner, Y pointing down; rotations are
 //! degrees CCW as seen from the top. Each `Place` is the footprint's own origin.
+//!
+//! A bottom-side part is the footprint flipped left-right (as pcbnew's flip of a
+//! footprint at angle 0) and then turned `rot`: `rot` is the angle KiCad shows and saves
+//! for it, still CCW as seen from the top.
 
 use crate::project::BoardRules;
 
@@ -28,6 +32,12 @@ pub fn at(x: f64, y: f64) -> Place {
 /// A top-side placement at (x, y), rotated `rot` degrees CCW.
 pub fn at_rot(x: f64, y: f64, rot: f64) -> Place {
     Place { x, y, rot, side: Side::Top }
+}
+
+/// A bottom-side placement at (x, y), rotated `rot` degrees CCW as seen from the top (the
+/// angle KiCad shows for the flipped footprint).
+pub fn at_bottom(x: f64, y: f64, rot: f64) -> Place {
+    Place { x, y, rot, side: Side::Bottom }
 }
 
 /// Rule area: no copper of any kind (e.g. antenna clearance).
