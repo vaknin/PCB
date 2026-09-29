@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-29",
+  "seconds": 7,
+  "qemu": {
+    "ok": true,
+    "banner": {
+      "name": "starter",
+      "rev": "0",
+      "target": "qemu",
+      "fw": "430050b",
+      "slot": "ota_0",
+      "psram": 8388608,
+      "nvs": true
+    },
+    "tests": [
+      {
+        "test": "sht40",
+        "result": "skip",
+        "detail": "no I2C in QEMU"
+      },
+      {
+        "test": "i2c_scan",
+        "result": "skip",
+        "detail": "no I2C in QEMU"
+      },
+      {
+        "test": "status_led",
+        "result": "skip",
+        "detail": "no GPIO in QEMU"
+      },
+      {
+        "test": "boot_button",
+        "result": "skip",
+        "detail": "no GPIO in QEMU"
+      }
+    ],
+    "summary": {
+      "pass": 0,
+      "fail": 0,
+      "skip": 4,
+      "missing": 0
+    },
+    "provision": true,
+    "problems": [],
+    "seconds": 0.0
+  },
+  "wokwi": null
+}

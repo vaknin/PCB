@@ -19,9 +19,9 @@ use anyhow::{Result, bail};
 use crate::circuit::Circuit;
 use crate::layout::Layout;
 use crate::sexpr::Sexp;
-use crate::{boardfile, cost, fab, gates, pcb, project, report, review, route, schematic};
+use crate::{boardfile, cost, fab, gates, pcb, project, report, review, route, schematic, sim};
 
-pub const STAGES: [&str; 8] = ["sch", "pcb", "route", "check", "fab", "fw", "cost", "review"];
+pub const STAGES: [&str; 9] = ["sch", "pcb", "route", "check", "fab", "fw", "sim", "cost", "review"];
 /// What runs when no stage is named: everything that builds and checks the design.
 pub const DEFAULT: usize = 6;
 
@@ -48,6 +48,7 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
     let mut stages: Vec<&str> = vec![];
     let mut base = board.dir.clone();
     let mut tries: Option<u32> = None;
+    let mut wokwi = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -59,8 +60,9 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
                 Some(n) => tries = Some(n),
                 None => bail!("--tries needs a number of at least 1"),
             },
+            "--wokwi" => wokwi = true,
             "-h" | "--help" => {
-                println!("usage: <board> [{}] [--out DIR] [--tries N]", STAGES.join("] ["));
+                println!("usage: <board> [{}] [--out DIR] [--tries N] [--wokwi]", STAGES.join("] ["));
                 return Ok(true);
             }
             s if STAGES.contains(&s) => stages.push(STAGES.iter().find(|x| **x == s).unwrap()),
@@ -147,10 +149,22 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
                 }
                 let dir = base.join("firmware");
                 std::fs::create_dir_all(&dir)?;
+                if !dir.join("CMakeLists.txt").exists() {
+                    copy_template(&crate::repo_root().join("templates/firmware"), &dir)?;
+                    println!("fw: new firmware project from templates/firmware in {}", dir.display());
+                }
                 let path = dir.join("board_pins.h");
                 std::fs::write(&path, boardfile::header(bf))?;
                 println!("fw: {}", path.display());
             }
+        }
+    }
+    if want("sim") {
+        let Some(bf) = &board_file else { bail!("sim needs a board.toml") };
+        // builds the board's own firmware project; results go next to the --out header
+        let ok = sim::run(bf, &board.dir.join("firmware"), &base.join("firmware"), &sim::Options { wokwi })?;
+        if !ok {
+            return Ok(false);
         }
     }
     if want("cost") {
@@ -162,6 +176,21 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
         println!("review: {}", review::write(&inputs)?.display());
     }
     Ok(true)
+}
+
+/// Copies the firmware template (files and directories) into a new firmware project.
+fn copy_template(from: &Path, to: &Path) -> Result<()> {
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let dest = to.join(e.file_name());
+        if e.file_type()?.is_dir() {
+            std::fs::create_dir_all(&dest)?;
+            copy_template(&e.path(), &dest)?;
+        } else {
+            std::fs::copy(e.path(), &dest)?;
+        }
+    }
+    Ok(())
 }
 
 fn cached<'a>(slot: &'a mut Option<Sexp>, sch: &Path) -> Result<&'a Sexp> {

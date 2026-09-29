@@ -1,0 +1,6 @@
+# Espressif QEMU (D-025): no USB, so the console is UART0; the target switch turns on the
+# stand-ins (tests that need GPIO, I2C, I2S or Wi-Fi report "skip").
+CONFIG_BOARD_TARGET_QEMU=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# QEMU has no RTC watchdog on the S3 (HARDWARE_LESSONS)
+CONFIG_BOOTLOADER_WDT_ENABLE=n

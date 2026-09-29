@@ -1,0 +1,25 @@
+menu "Board (pcbgen, D-025)"
+
+choice BOARD_TARGET
+    prompt "What this build runs on"
+    default BOARD_TARGET_REAL
+    help
+        REAL is the only build that may be flashed to a board (devctl refuses the others).
+        QEMU and WOKWI swap in stand-ins for what the simulator lacks: injected audio,
+        a loop instead of deep sleep, and (QEMU) a UART0 console and Ethernet.
+
+    config BOARD_TARGET_REAL
+        bool "Real hardware"
+    config BOARD_TARGET_QEMU
+        bool "Espressif QEMU (no GPIO, I2C, I2S, USB, Wi-Fi or deep sleep)"
+    config BOARD_TARGET_WOKWI
+        bool "Wokwi (no I2S or deep sleep)"
+endchoice
+
+config BOARD_TARGET_NAME
+    string
+    default "real" if BOARD_TARGET_REAL
+    default "qemu" if BOARD_TARGET_QEMU
+    default "wokwi" if BOARD_TARGET_WOKWI
+
+endmenu
