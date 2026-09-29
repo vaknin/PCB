@@ -1,57 +1,134 @@
 {
   "unrouted_connections": 0,
-  "track_segments": 277,
+  "track_segments": 268,
   "track_length_mm": {
-    "B.Cu": 251.4,
-    "F.Cu": 420.3
+    "B.Cu": 141.4,
+    "F.Cu": 534.5
   },
-  "vias_total": 113,
-  "vias_gnd": 65,
-  "vias_signal": 48,
+  "vias_total": 87,
+  "vias_gnd": 48,
+  "vias_signal": 39,
   "vias_by_net": {
-    "+3V3": 22,
-    "+5V": 3,
-    "/BOOT": 2,
+    "+3V3": 20,
+    "/CC1": 2,
     "/EN": 3,
-    "/I2C_SDA": 4,
-    "/PWR_LED": 2,
+    "/I2C_SCL": 2,
+    "/I2C_SDA": 3,
     "/UART_RX": 2,
     "/UART_TX": 2,
-    "/USB_D+": 3,
-    "/USB_D-": 2,
-    "GND": 65,
+    "/USB_D+": 2,
+    "GND": 48,
     "VBUS": 3
   },
   "copper_in_keepouts": [],
   "thinner_than_class_mm": {
-    "+3V3": 5.3,
-    "/I2C_SCL": 2.6,
-    "/I2C_SDA": 5.5,
-    "/UART_RX": 1.2,
-    "/UART_TX": 3.0,
-    "/USB_D-": 1.2,
-    "GND": 27.1
+    "+3V3": 0.8,
+    "GND": 0.8
   },
   "pours": {
     "+3V3 F.Cu": {
       "pieces": 1,
-      "filled_pct": 94.9,
+      "filled_pct": 93.5,
       "largest_piece_pct_of_fill": 100.0
     },
     "GND F.Cu": {
-      "pieces": 2,
-      "filled_pct": 60.7,
-      "largest_piece_pct_of_fill": 81.3
+      "pieces": 3,
+      "filled_pct": 50.3,
+      "largest_piece_pct_of_fill": 70.3
     },
     "GND B.Cu": {
       "pieces": 1,
-      "filled_pct": 69.5,
+      "filled_pct": 73.5,
       "largest_piece_pct_of_fill": 100.0
     },
     "+3V3 B.Cu": {
       "pieces": 1,
-      "filled_pct": 100.0,
+      "filled_pct": 97.3,
       "largest_piece_pct_of_fill": 100.0
     }
+  },
+  "router": {
+    "kept_order": 2,
+    "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest",
+    "orders": [
+      {
+        "order": 0,
+        "unrouted": {
+          "+3V3": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 22,
+        "track_length_mm": 673.2,
+        "freerouting_clearance_violations": 20
+      },
+      {
+        "order": 1,
+        "unrouted": {
+          "+3V3": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 23,
+        "track_length_mm": 675.5,
+        "freerouting_clearance_violations": 20
+      },
+      {
+        "order": 2,
+        "unrouted": {},
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 20,
+        "track_length_mm": 672.9,
+        "freerouting_clearance_violations": 20
+      },
+      {
+        "order": 3,
+        "unrouted": {},
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 22,
+        "track_length_mm": 681.2,
+        "freerouting_clearance_violations": 20
+      },
+      {
+        "order": 4,
+        "unrouted": {
+          "+3V3": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 19,
+        "track_length_mm": 689.6,
+        "freerouting_clearance_violations": 20
+      },
+      {
+        "order": 5,
+        "unrouted": {},
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 23,
+        "track_length_mm": 700.5,
+        "freerouting_clearance_violations": 20
+      },
+      {
+        "order": 6,
+        "unrouted": {},
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 27,
+        "track_length_mm": 721.3,
+        "freerouting_clearance_violations": 20
+      },
+      {
+        "order": 7,
+        "unrouted": {},
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 20,
+        "track_length_mm": 694.6,
+        "freerouting_clearance_violations": 20
+      }
+    ]
   }
 }
