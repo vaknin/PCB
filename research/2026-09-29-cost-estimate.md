@@ -11,6 +11,7 @@ Tags: **VERIFIED** = fetched today from the URL given. **FROM-LESSONS** = taken 
 - **A typical small hobby board** (a module, 3–5 special parts): **about $85–$130 for 5**, depending mainly on whether the goods land under $75.
 - **Per board, starter design:** about **$26 each at 5**, **$17 at 10** and **$11.50 at 30**. The fixed costs are about $58 per order (setup, stencil, special-part fees, shipping) and get shared across more boards.
 - **Biggest costs:** the ESP32 module ($5.13 each, about 55% of the parts bill at 5 boards), shipping ($29.59 FedEx), the $3.07 fee for each special ("Extended") part ($18.42 for six), and the 18% VAT once goods pass $75.
+- **Several different designs per shipment (the owner's real pattern, D-021):** each design as its own order, 5 bare PCBs with 2 assembled, all in one combined parcel: about **$72 per design** for the starter and **$52–70** for a typical small design, VAT included (section 5, INFERRED).
 - Money-saving levers, largest first:
   - Keep goods under $75 (assemble fewer boards, or drop one or two Extended parts).
   - Use Basic parts where a Basic part exists.
@@ -159,6 +160,55 @@ The per-board part cost falls too, because the ESP32 gets cheaper in the 10+ and
 | Shipping, $29.59+ (each order) | PCB board area (tiny at 5–10 boards, which are a flat $4–5) |
 | Minimum-order leftovers of cheap Basic parts (about $3–6) | VAT at 18% once goods pass $75 (applies to the whole order, shipping included) |
 | PCB engineering fee ($4, from 30 boards up) | |
+
+## 5. Per design: five different designs in one parcel (D-021, option A)
+
+The owner's real pattern: 1–2 copies each of about 5 different boards per shipment, never 5 copies of one board. Under D-021, each design is its own order with 5 bare PCBs, 2 of them assembled. JLCPCB's "Combine Shipping" then sends the orders in one parcel.
+
+- **Rules used (all VERIFIED 2026-09-29):**
+  - Economic PCBA takes 2–50 boards (https://jlcpcb.com/capabilities/pcb-assembly-capabilities).
+  - 5 bare with 2 assembled is allowed; the 3 blank ones may come back with solder on them (https://jlcpcb.com/help/article/pcb-assembly-faqs-part-2).
+  - Combine Shipping holds orders and ships them as one parcel. It is free for the first 15 days (https://jlcpcb.com/help/article/combine-shipping-service).
+- **Assumptions (INFERRED):**
+  - Setup, stencil and Extended fees are charged in every order, so each design pays its own.
+  - Shipping is paid once per parcel. Five orders of 5 small boards (25 PCBs) weigh 0.5–1 kg, so FedEx is $29.59–35.74, split 5 ways.
+  - The parcel's goods are far over $75, so 18% VAT applies to goods plus shipping.
+  - That 5 is the smallest bare-PCB quantity is **not confirmed**.
+
+**The starter as one of the five** (parts for 2 boards priced with the same minimums as section 1):
+
+| Line | One design |
+|---|---|
+| PCB (5 bare) | 4.00 |
+| Setup + stencil | 9.71 |
+| Joints (2 × 143) | 0.46 |
+| Extended fees (6) | 18.42 |
+| Parts for 2 boards | 22.08 |
+| **Goods** | **54.66** |
+| Shipping share (1/5 of $29.59–35.74) | 5.92–7.15 |
+| VAT 18% on goods + shipping share | 10.90–11.13 |
+| **Per design, delivered** | **$71.50–72.95** |
+
+**A typical small design** (section 3B's assumptions, at 2 boards; INFERRED):
+
+| | Low (3 Extended parts) | High (5 Extended parts) |
+|---|---|---|
+| Goods | $37.96 | $52.13 |
+| Shipping share | $5.92–7.15 | $5.92–7.15 |
+| VAT | $7.90–8.12 | $10.45–10.67 |
+| **Per design, delivered** | **$52–53** | **$68.50–70** |
+| **Five such designs** | **$259–266** | **$342–350** |
+
+**What the shared parcel does:**
+- **Shipping:** each design pays $6–7 instead of $29.59.
+- **VAT:** a parcel of five designs is always over $75, so VAT adds 18%. A single design shipped alone at 2 assembled stays under $75 and pays none. Even so, the starter costs $84.25 alone (section 3A) against ~$72 in the shared parcel, and a low typical design $67.55 against ~$52.
+- **The fees are the rest.** Setup, stencil and Extended fees are $28–35 of each design's goods. The Extended fees alone are $9–18, and each design pays them again, even when several designs use the same module.
+- My earlier rough figure of $250–300 for five designs holds for designs at the low end. Designs with 5 Extended parts reach about $350.
+
+**Ways to cut it (from D-021):**
+- Use Basic parts wherever one exists. Each Extended part dropped saves $3.07 plus its VAT, per design.
+- Pre-order a module that recurs (e.g. the ESP32) into "My Parts Lib". Pre-ordered parts are stored free and used first in later orders (VERIFIED, https://jlcpcb.com/help/article/smt-reorder-process-overview). Whether that avoids the $3.07 fee on each later order is **unknown**; check before relying on it.
+- A shared panel (D-021 option B) pays setup, stencil and each Extended fee once for all designs. That saves roughly $40–70 per shipment (INFERRED, not priced), at the cost of the constraints listed in D-021.
 
 ## Bottom-side (double-sided) assembly
 

@@ -3,6 +3,41 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-021 Ordering several different boards per shipment: separate orders in one parcel (A) for now; a shared panel (B) documented (DECIDED by the owner, 2026-09-29)
+- **The need:** 1–2 copies each of about 5 different boards per shipment, never 5 copies of one board.
+- **Name clash:** these A/B options are about *how orders are grouped*. The A/B/C table in `docs/brief.md` is about *who assembles* (fab / mixed / owner); they are separate choices.
+- **Owner's words:** "option a is quite expensive. document both, but for now implement/decide A."
+- **Facts:** from JLCPCB help pages read 2026-09-29 (VERIFIED unless marked).
+- **Option A: each design its own order, shipped together (DECIDED for now)**
+  - Each order has 5 bare PCBs, 2 of them assembled.
+    - Economic PCBA takes 2–50 boards (VERIFIED, jlcpcb.com/capabilities/pcb-assembly-capabilities).
+    - 5 bare with 2 assembled is allowed; the blank ones may come back with solder on them (VERIFIED, jlcpcb.com/help/article/pcb-assembly-faqs-part-2).
+    - That 5 is the smallest bare quantity is NOT confirmed.
+  - Orders can share a cart (jlcpcb.com/help/article/How-to-order-multiple-different-PCBs-together). "Combine Shipping" holds finished orders and ships them as one parcel, by weight, count or a weekly day; storage is free for the first 15 days (VERIFIED, jlcpcb.com/help/article/combine-shipping-service). So the designs don't have to be finished at the same time.
+  - **Paid per design:** PCB $4, setup $8.18, stencil $1.53 (VERIFIED, jlcpcb.com/help/article/pcb-assembly-price), $3.07 per unique Extended part, and the parts for 2 boards.
+    - That setup and stencil are charged per order is INFERRED.
+    - Extended fees are paid again in every order, e.g. once more for the ESP32 module in each design.
+  - **Paid once per parcel:** shipping, ~$30 FedEx, more with weight.
+  - **Cost (INFERRED, `research/2026-09-29-cost-estimate.md` §5):** about $72 per design for the starter; $52–70 for a typical small design, VAT included; about $260–350 for five. The parcel is always over the $75 VAT line.
+  - **Ways to cut it:**
+    - Use Basic parts instead of Extended where possible.
+    - Keep a recurring module in "My Parts Lib" by pre-ordering it. Pre-ordered, global-sourcing and consigned parts are stored free and used first in later orders (VERIFIED, jlcpcb.com/help/article/smt-reorder-process-overview). Leftovers of ordinary library parts are discarded (VERIFIED, pcb-assembly-faqs-part-2).
+    - Whether pre-ordering avoids the repeated Extended fee is UNKNOWN; check it before the first real shipment.
+  - No pipeline work is needed: each board already produces its own fab package.
+- **Option B: several designs on one assembled panel (documented; not now)**
+  - Up to 10 designs per board (VERIFIED, jlcpcb.com/help/article/pcb-panelization). A PCBA panel with more than one design adds $8.21 (VERIFIED, pcb-assembly-price). Mixed panels can be assembled (VERIFIED, jlcpcb.com/help/article/in-what-cases-will-there-be-charged-extra).
+  - Economic PCBA doesn't allow V-cut, so boards are joined by tabs or mouse-bites.
+  - The bare-PCB fee per extra design is NOT confirmed; the quote page shows it only once a count is picked.
+  - **Saves:** one setup and one stencil for all designs, and each Extended part's fee once instead of once per design. Roughly $40–70 per shipment (INFERRED, not priced).
+  - **Costs:**
+    - Every design must be ready at the same time.
+    - They must share thickness, colour and finish.
+    - The owner breaks them apart, which leaves rough edges.
+    - A mistake in one design can mean redoing the whole panel.
+    - pcbgen would need a new panelization step.
+  - **Revisit when:** the owner often finishes several designs at once, or A's cost starts to bite.
+- **Nothing is ordered.** Any real order still needs a summary and the owner's OK.
+
 ## D-019 pcbgen: the route stage checks its best candidates with KiCad's DRC (DECIDED, technical, 2026-09-29)
 - **Why:** the router's own numbers (unrouted, thin track, vias, length) can't see some faults. On D-018's scratch board, the order ranked best ran a track through the ground pour's spokes to the USB-C shell pads, and the full check failed with 2 `starved_thermal` errors. A different order would have passed.
 - **What:** after Freerouting has routed every order, the best `RouteOptions::drc_checks` of them (default 3) are each finished the way the kept one always was: tracks and vias, zone fill, stitching, fill. Each runs in its own copy of the project (`route/try-<n>/check/`) and gets the same DRC gate as the check stage: fab rules, schematic parity, the board's waivers.
@@ -276,6 +311,7 @@ at JLCPCB (the 5-board price covers up to 100×100).
   - (project skill: done as the global draft `~/.claude/skills/pcb-pipeline/SKILL.md`, at the owner's request)
   - check every UNVERIFIED rotation in JLCPCB's placement preview (list in `boards/<name>/fab/README.md`)
   - the fab's own manufacturability check on upload; current fab promotions (NextPCB Rev 0 vs JLCPCB); the A/B/C cost table from `docs/brief.md`
+  - (D-021) whether 5 is JLCPCB's smallest bare-PCB quantity with 2 assembled, and whether a module pre-ordered into "My Parts Lib" still pays the $3.07 Extended fee in each later order
 - (KiCad 11 port: closed by D-016. When KiCad 11 arrives, check that `sch upgrade` / `pcb upgrade` still accept the format versions pcbgen writes, then run the starter board end to end.)
 - (Routing quality between tries: closed by D-017.)
 - **Unexplained, harmless for now:** why the `2cca03f` board was routed without its net classes (a fresh `sch pcb route` applies them), and why one stitching via landed 0.185 mm from a track while inside the pour (now checked directly; the Rust stitcher keeps the same direct check).
