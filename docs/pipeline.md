@@ -1,44 +1,53 @@
 # The pcbgen pipeline
 
-Circuit as Python code → KiCad schematic → ERC → PCB placed by code → Freerouting → DRC → fab files.
-Why this shape: `DECISIONS.md` D-004, D-005 and D-010.
+Circuit as Rust code → KiCad schematic → ERC → PCB placed by code → Freerouting → DRC → fab files.
+Why this shape: `DECISIONS.md` D-004, D-005, D-010 and D-016 (the Rust port, no SWIG).
 
 ## Setup (once)
-- **KiCad 10** from Arch `extra` (D-001).
-- **Python venv:** `uv venv --python /usr/bin/python3 --system-site-packages .venv`. System site-packages are needed for `pcbnew`.
+- **KiCad 10** from Arch `extra` (D-001). Only `kicad-cli` is used; no KiCad library is loaded.
+- **Rust:** pinned in `mise.toml` (1.98.1); `cargo` comes from mise.
 - **Freerouting:** `scripts/fetch-tools.sh` downloads its bundle (with its own Java 25) into `tools/` and checks it.
 
 ## Run
 ```
-.venv/bin/python -m pcbgen boards/<name> [sch] [pcb] [route] [check] [fab]
+cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [--out DIR]
 ```
-With no stage named, all stages run in order, each in its own process (a crash in KiCad's SWIG code stops only that stage, by name). Add `-X faulthandler -u` when debugging crashes; for heap corruption see HARDWARE_LESSONS ("SWIG ownership bugs"). Filter the output with `grep -v "assert\|swig/python detected"`.
+With no stage named, all stages run in order. `--out DIR` writes `DIR/kicad` and `DIR/fab` instead of the board's own directories (for comparison runs). A full run of the starter board takes about 40 s (Freerouting ~20 s).
 
 | Stage | Does | Output |
 |---|---|---|
 | sch | writes `.kicad_pro` + `.kicad_dru` (fab rules), then the schematic; refuses if any pin is neither connected nor marked nc; then the netlist round-trip and net-class gates | `kicad/<name>.kicad_sch` |
-| pcb | exports the netlist from the schematic, loads footprints, places them from `layout.SPEC`, adds outline, GND pours, local copper zones (`CopperZone`), labels, escape stubs | `kicad/<name>.kicad_pcb` |
-| route | DSN export (pours hidden from the router) → Freerouting (up to 3 tries) → SES import → kicad-cli zone fill → stitching vias (GND, plus `stitch_local` nets) → fill; each SWIG step in its own process | same file; work files in `kicad/route/` |
+| pcb | exports the netlist from the schematic, loads footprints, places them from the layout, adds outline, GND pours, local copper zones (`CopperZone`), labels, escape stubs; `kicad-cli pcb upgrade --force` re-saves it | `kicad/<name>.kicad_pcb` |
+| route | deletes old unlocked tracks → DSN written by pcbgen (pours hidden from the router) → Freerouting (up to 3 tries, each with a different footprint order) → SES read back → kicad-cli zone fill → stitching vias (GND, plus `stitch_local` nets) → fill | same file; work files in `kicad/route/` |
 | check | netlist round trip, net-class patterns, ERC, DRC (JLCPCB rules, schematic parity), routing report; fails on any error, unwaived warning, unrouted connection or copper in a keep-out | `kicad/reports/{erc,drc,routing}.json` |
 | fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections; lists parts whose rotation is UNVERIFIED | `fab/` (see `fab/README.md`) |
 
 `scripts/render.sh boards/<name> [out.png] [layers]` renders the top side to look at.
 
-## A board directory
-- `circuit.py`: `build() -> Circuit`. It declares the parts (KiCad symbol, footprint, LCSC#, MPN) and connects them:
-  - `net += part["PIN"]` connects a pin (by number or name).
-  - `part.nc(...)` marks pins unused.
-  - `c.pwr_flag(net)` marks a net as driven from off the sheet.
-- `layout.py`:
-  - `RULES`: net classes.
-  - `SPEC`: board size, the `Place(x, y, rot)` for every reference in mm from the top-left with Y down, silk `Text` labels, and `CopperZone`s (local pours of one net, e.g. regulator cooling copper; filled above GND).
-  - `ROUTE`: Freerouting and stitching options.
-  - `WAIVERS`: `(type, substring, reason)` entries.
+## Code layout
+- `crates/pcbgen`: the library. `circuit` (model), `symlib` (`.kicad_sym`), `schematic`, `project` (`.kicad_pro`, `.kicad_dru`), `footprint` (`.kicad_mod` loading and placing), `pcb` (board writer), `board` (typed view of a saved `.kicad_pcb`), `geom`, `dsn`, `ses`, `route`, `stitch`, `gates`, `report`, `fab`, `layout` (the types a board's layout uses), `cli`.
+- `boards/<name>`: one binary crate per board (a member of the workspace).
+
+## A board directory (a crate)
+- `Cargo.toml`: depends on `pcbgen = { path = "../../crates/pcbgen" }`.
+- `src/main.rs`: hands the board to `pcbgen::cli::main` (copy it from `boards/starter`).
+- `src/circuit.rs`: `build() -> Circuit`. It declares the parts (KiCad symbol, footprint, LCSC#, MPN) and connects them:
+  - `c.part(ref, symbol, value, footprint).lcsc(..).mpn(..).block(..).id()` adds a part.
+  - `c.connect(net, part, &["PIN", ...])` connects pins (by number or name).
+  - `c.nc(part, &[...])` marks pins unused.
+  - `c.pwr_flag(&[net])` marks a net as driven from off the sheet.
+  - A bad symbol, pin or double connection panics at the line that made it.
+- `src/layout.rs`: `layout() -> Layout` with
+  - `rules`: net classes (`NetClass::new(name, track, clearance, via_dia, via_drill).patterns(..)`).
+  - `spec`: board size, `places` (every reference: `at(x, y)` or `at_rot(x, y, deg)`, mm from the top-left with Y down), silk `Text` labels, and `CopperZone`s (local pours of one net, e.g. regulator cooling copper; filled above GND).
+  - `route`: Freerouting and stitching options.
+  - `waivers`: `Waiver { kind, substring, reason }` entries.
+- Generated: `kicad/` and `fab/`.
 - Modified footprints go in `lib/footprints/<Lib>.pretty` (repo root); the `sch` stage points the project's fp-lib-table there for any library of that name. Currently `pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3` (D-015).
 
 ## Status (2026-09-29, starter board)
-- **All gates pass on a clean end-to-end run:** netlist round trip, ERC 0, DRC 0 open (11 waived cosmetic silk warnings), routing 0 unrouted and no copper in keep-outs.
-- **Routing (after D-015):** 20 signal vias, 20 +3V3 cooling vias, 54 GND vias, ~670 mm of track. Bottom GND pour is one piece covering 73% of the board. Smallest hole 0.3 mm.
+- **All gates pass on a clean end-to-end run of the Rust pipeline:** netlist round trip, ERC 0, DRC 0 open (11 waived cosmetic silk warnings), routing 0 unrouted and no copper in keep-outs.
+- **Numbers from the latest run are in `kicad/reports/routing.json`.** Freerouting's tracks differ between pipeline versions (see D-016), the design does not: 20 +3V3 cooling vias, smallest hole 0.3 mm.
 - **Fab files:** made. 8 parts have UNVERIFIED rotations (listed in `fab/README.md`).
 - **Datasheet check and blind review done** (D-014). Before any order: check rotations in JLCPCB's preview, the fab's own manufacturability check, and the owner's OK on cost.
 - **Phase 1 is closed.** The starter board is a tooling test; it will not be ordered unless the owner asks.

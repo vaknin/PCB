@@ -54,9 +54,9 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - (since 2026-06-02)
 
 ## Tool gotchas
-- **Laptop (verified 2026-09-29):** `kicad-cli` 10.0.6. `import pcbnew` works from system Python 3.14
-  (`/usr/lib/python3.14/site-packages/pcbnew.py`). Build venvs with `uv venv --python /usr/bin/python3 --system-site-packages`.
+- **Laptop (verified 2026-09-29):** `kicad-cli` 10.0.6; Rust 1.98.1 from the repo's `mise.toml`.
   Libraries are in `/usr/share/kicad/{symbols,footprints}`; no 3D models yet.
+  pcbgen no longer loads KiCad's SWIG `pcbnew` (D-016), so KiCad 11 dropping it breaks nothing.
 - **tscircuit autorouter:**
   - It can report success and still leave shorts (overlapping vias, a via on a pad). Always run `tsci check shorts` and an independent KiCad DRC.
   - It does not enforce USB differential pairs.
@@ -65,27 +65,26 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - The exported schematic fails KiCad ERC.
   - Pad-number collisions can merge pads.
   - Board cutouts are dropped from gerbers.
-- **kicad-cli (v10):** it cannot export Specctra DSN or import SES. Use the SWIG `pcbnew` module (deprecated; removed in KiCad 11).
-- **KiCad 10 IPC API:** it needs the GUI running. Headless automation means SWIG or editing the file directly.
+- **kicad-cli (v10):** it cannot export Specctra DSN or import SES. pcbgen writes the DSN and reads the SES itself (D-016).
+- **KiCad 10 IPC API:** it needs the GUI running. pcbgen edits the files directly instead.
+- **`kicad-cli pcb upgrade --force`** re-saves a board in KiCad's own format even when it is already current: a quick "does KiCad parse what we wrote" check (the `pcb` stage runs it). `sch upgrade` does the same for schematics.
+- **KiCad 10 board-file conventions (verified 2026-09-29 against pcbnew-saved boards):**
+  - Nets are written by name only (`(net "GND")`); there is no net table.
+  - In a footprint, pad and graphic positions stay in the footprint's frame, but pad, property and text *angles* include the footprint's rotation (a pad at 0 in a footprint at 270 is saved at 270).
+  - Zones inside a footprint (keep-outs) are saved in board coordinates.
+  - KiCad saves footprints ordered by UUID, so a line diff of two boards is useless; compare footprints by reference.
+  - A hidden field with no `(thickness)` gets 0.15 mm on load; write `(thickness 0)` to keep pcbnew's.
+  - Rotating a footprint-frame point into the board: (x·cos + y·sin, −x·sin + y·cos), angle CCW, Y down.
 - **Freerouting 2.4.x:**
   - It needs Java 25.
   - KiCad's DSN export omits board-edge clearance, so pass `--router.copperToEdgeClearanceUm=500`.
 - **atopile 0.15.x:** it cannot read KiCad 10-saved boards.
-- **SWIG `pcbnew` on Python 3.14:** every `for x in board.Tracks()` / `fp.GraphicalItems()` raises `'SwigPyIterator' object has no attribute 'next'`. `pcbgen/kicad.py` aliases `next = __next__`; always `from .kicad import pcbnew`.
-- **SWIG `pcbnew` has no `RotatePoint`.** Rotate by hand: board = (x·cos + y·sin, −x·sin + y·cos), with the angle CCW and Y pointing down.
-- **SWIG ownership bugs cause the segfaults (verified 2026-09-29 with glibc's heap checker, D-011):**
-  - `board.Remove(item)` sets `thisown=1`: Python frees the item while KiCad's connectivity and DSN export still point at it. After `Remove`, set `item.thisown = False` (leak it) and call `board.BuildConnectivity()`.
-  - `zone.Outline()`, `fp.GetCourtyard(layer)`, `poly.COutline(i)` return KiCad-owned objects with `thisown=True`. Wrap them in `pcbgen.kicad.borrowed()`. Copy them (`SHAPE_POLY_SET(...)`) if they must outlive an edit.
-  - The crash shows up later and somewhere unrelated (inside an `import`, inside `traceback` printing an ordinary exception, or as board items turning into bare `SwigPyObject`s).
-  - To find the real culprit, run with `LD_PRELOAD=/usr/lib/libc_malloc_debug.so GLIBC_TUNABLES=glibc.malloc.check=3 PYTHONMALLOC=malloc python -X faulthandler -u ...`. It then crashes at the first bad access, and the Python frame points at the step.
-  - `coredumpctl debug <pid>` showing `Py_RunMain → PyImport_Import` means Python was printing an uncaught exception on a corrupted heap. Catch it and print with `os.write` to see it.
-  - Board items themselves (`GetTracks()`, `GetFootprints()`, pads, zones) come back with `thisown=False`, so they're fine.
 - **Freerouting and copper pours:** zones go into the DSN as `plane`s, and Freerouting then counts every pad on that net as connected and routes none of them. Take the pours out of the board before the DSN export (D-012).
-- **Freerouting output varies run to run, and can neck tracks down** to pad width near small pads (0.225 or 0.15 mm on a 0.3 mm class). DRC accepts it; `reports/routing.json` lists it.
-- **`kicad-cli pcb drc --refill-zones --save-board`** is the headless zone fill (there is no separate fill command). `pcbgen.kicad.fill_zones` uses it.
-- **Worktree sessions:** `.venv` and `tools/` are gitignored in the main checkout. Symlink them into a worktree (`ln -s /home/kivan/Projects/PCB/.venv .venv`, same for `tools`). The symlinks show as untracked (the ignore rules end in `/`); don't commit them.
-- **SWIG "memory leak of type PCB_TRACK/PCB_VIA" lines** at exit are harmless noise. Filter them with `grep -v "swig/python detected"`.
-- **KiCad 11 removes the SWIG `pcbnew` module** (DSN export, SES import, zone fill, stitching all use it). Arch upgrades KiCad on a normal `pacman -Syu`. When KiCad 11 lands, either hold the package or port `pcb.py`/`route.py` to the IPC API (which needs the GUI) or direct file editing. Timing is not yet confirmed.
+- **Freerouting is deterministic (verified 2026-09-29):** the same DSN gave the same score, violations and track widths on repeated runs, for both the Python and the Rust DSN. The "run to run variation" seen before came from pcbnew giving footprints random UUIDs, which reordered the DSN. The footprint order steers the result, so pcbgen's retries shuffle it with a seed.
+- **Freerouting can neck tracks down** to pad width near small pads (0.225 or 0.15 mm on a 0.3 mm class). DRC accepts it; `reports/routing.json` lists it. How much depends on the footprint order: the first Rust run had 27 mm of GND at 0.15/0.225 mm, the last Python run none.
+- **`--router.via_costs` does nothing in Freerouting 2.4.1:** the log says "Unknown settings property" and ignores it. pcbgen still passes it (harmless); via cost has to be set another way if it ever matters.
+- **`kicad-cli pcb drc --refill-zones --save-board`** is the headless zone fill (there is no separate fill command). `gates::fill_zones` uses it. The saved `filled_polygon`s are single outlines with their holes joined in by zero-width cuts; stitching reads them.
+- **Worktree sessions:** `tools/` is gitignored in the main checkout. Symlink it into a worktree (`ln -s /home/kivan/Projects/PCB/tools tools`). The symlink shows as untracked (the ignore rule ends in `/`); don't commit it.
 - **Freerouting and footprint keep-outs:** Freerouting routes to pad *centres*. A footprint keep-out with only a pad-sized notch (SHT40) makes those pads unroutable; a locked escape stub fixes it (D-010). Freerouting's log "N unrouted" is the first thing to read.
 - **Modified footprints live in their own library** (`lib/footprints/<Lib>.pretty`, found by the `sch` stage). With a new name in its own library, DRC's `lib_footprint_mismatch` compares the footprint with itself, so no waiver is needed (verified on the 0.3 mm ESP32 copy, 2026-09-29).
 - **Editing a library footprint's silk** (to fix clearance warnings) triggers DRC `lib_footprint_mismatch`. Waive cosmetic silk items with a reason instead.
