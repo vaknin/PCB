@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "provision.h"
+#include "sensirion.h"
 #include "selftest.h"
 
 #define SHT40_ADDR 0x44
@@ -29,19 +30,6 @@ static esp_err_t i2c_up(void)
         .flags.enable_internal_pullup = false, // R7/R8 are on the board
     };
     return i2c_new_master_bus(&cfg, &bus);
-}
-
-// Sensirion CRC-8: polynomial 0x31, init 0xFF (SHT4x datasheet §4.4)
-static uint8_t crc8(const uint8_t *d, int n)
-{
-    uint8_t crc = 0xFF;
-    for (int i = 0; i < n; i++) {
-        crc ^= d[i];
-        for (int b = 0; b < 8; b++) {
-            crc = crc & 0x80 ? (uint8_t)(crc << 1) ^ 0x31 : (uint8_t)(crc << 1);
-        }
-    }
-    return crc;
 }
 
 static selftest_result_t sht40(char *detail, size_t len)
@@ -71,12 +59,11 @@ static selftest_result_t sht40(char *detail, size_t len)
         snprintf(detail, len, "no answer at 0x44 (%s)", esp_err_to_name(err));
         return SELFTEST_FAIL;
     }
-    if (crc8(r, 2) != r[2] || crc8(r + 3, 2) != r[5]) {
+    float t, rh;
+    if (!sht4x_convert(r, &t, &rh)) {
         snprintf(detail, len, "CRC mismatch");
         return SELFTEST_FAIL;
     }
-    float t = -45 + 175 * ((r[0] << 8) | r[1]) / 65535.0f;
-    float rh = -6 + 125 * ((r[3] << 8) | r[4]) / 65535.0f;
     snprintf(detail, len, "%.1f C, %.0f %%RH", t, rh);
     // plausible indoors; outside this the sensor or its reading is suspect
     return t > 0 && t < 50 && rh > 0 && rh < 100 ? SELFTEST_PASS : SELFTEST_FAIL;

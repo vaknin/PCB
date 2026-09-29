@@ -1,13 +1,13 @@
 {
   "date": "2026-09-29",
-  "seconds": 16,
+  "seconds": 4,
   "qemu": {
     "ok": true,
     "banner": {
       "name": "starter",
       "rev": "0",
       "target": "qemu",
-      "fw": "d7ba1d8-dirty",
+      "fw": "9d9f2b7-dirty",
       "slot": "ota_0",
       "psram": 8388608,
       "nvs": true
@@ -39,7 +39,7 @@
       "fail": 0,
       "skip": 4,
       "missing": 0,
-      "ms": 222
+      "ms": 221
     },
     "provision": true,
     "problems": [],

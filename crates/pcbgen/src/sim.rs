@@ -347,6 +347,9 @@ fn qemu_script(bf: &BoardFile, con: &mut Console) -> Result<Value> {
     provision &= listed.iter().any(|l| l == "KEY sim_check 3");
     con.send("PROV DEL sim_check")?;
     provision &= con.expect("PROV ")? == "OK sim_check 0";
+    // a line longer than the firmware's buffer must be refused, never stored cut off
+    con.send(&format!("PROV SET sim_long {}", "00".repeat(600)))?;
+    provision &= con.expect("PROV ")? == "ERR line";
     provision &= !con.log.iter().any(|l| !l.starts_with(">>") && l.contains("73696d"));
     if !provision {
         problems.push("provisioning round trip failed (see sim.log)".into());
