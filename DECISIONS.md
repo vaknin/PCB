@@ -57,6 +57,45 @@ Research behind these: `research/2026-09-29-landscape.md`.
   - **Revisit when:** the owner often finishes several designs at once, or A's cost starts to bite.
 - **Nothing is ordered.** Any real order still needs a summary and the owner's OK.
 
+## D-020 pcbgen: when routing fails, try more on its own, then report what failed and why; a failure log per board (DECIDED, owner approved the scope, 2026-09-29)
+- **Owner's words:** "I agree, let's implement this error pipeline." It lives in the route stage, not in a Claude Code hook, because the pipeline is what detects the failure.
+- **Escalation, cheapest first:** it runs only when none of the best `drc_checks` orders is clean. Code: `route::next_step`.
+  1. DRC-check every other order already routed (~15 s each, `max(parallel, drc_checks)` at once).
+  2. Route `RouteOptions::extra_rounds` rounds (default 1) of `extra_tries` new orders (default 8, seeds after the last), and check them.
+  3. Stop. Keep the best-ranked clean order, else the one with the fewest open items. Deterministic: seeded orders, ties go to the lower order.
+  - `tries.json` records the steps taken.
+- **Failure report:** when nothing is clean, `route/failure.json` is written and printed. For each distinct open DRC item across the checked orders it gives:
+  - its type, severity and the parts involved
+  - its position in layout mm (from the board's top-left, as `layout.rs` places parts)
+  - how many checked orders hit it: all of them means placement or rules; some of them means routing luck
+  - a suggested fix
+  - Items are grouped across orders by type plus items, with track lengths taken out.
+  - The fixes are a small table in `crates/pcbgen/src/failure.rs`, with "move the parts involved" as the fallback.
+- **Failure log:** `<board>/route-failures.jsonl` is committed. It has one line per failed order: date, board, a layout fingerprint (hash of the DSN), the order, and each error's type and parts.
+  - A re-run of an unchanged board adds nothing.
+  - The stage prints the board's error types by frequency.
+  - It also reads the sibling boards' logs and prints `RULE (D-020)` for any error type that has failed on two or more boards.
+  - Orders that failed but were rescued by escalation are not logged; `tries.json` has them.
+- **Rule:** when the same error type fails on two boards, turn it into a prevention rule the router gets (a DSN constraint, opt-in in `RouteOptions`/the layout) and add a `HARDWARE_LESSONS.md` entry.
+- **First prevention rule: `RouteOptions::pad_rings`** (`PadRing::new("J1", "SH")`, margin 1.0 mm).
+  - It is a no-tracks, no-vias keep-out in the DSN: the pad's rectangle grown by the margin, on the pad's copper layers. The board and its DRC don't see it.
+  - It refuses a pad that isn't on a poured net, since the ring would leave that pad unroutable.
+  - **Verified on D-018's board, J1's 4 shield pads ringed, all 8 orders checked:** `starved_thermal` in 0 of 8 orders (1 of 8 without rings; 2 of 16 in the forced-failure run). Every gate passed. The rings in the DSN match the pads (1.0 × 2.1 mm pad → 3.0 × 4.1 mm ring).
+  - **Cost:** it blocks routing channels near the connector. 5 of 8 orders left a signal unrouted (2 of 8 without), and each Freerouting run took ~145 s instead of ~75 s. So it stays opt-in, for a board that hits the error; it is not a default.
+- **Tests:**
+  - 6 new unit tests: the ladder's decisions, choosing the kept order by global rank, the worker pool's order, reading parts/pads/fixes from a sample DRC JSON, grouping across orders, and the log's dedupe, tally and two-board rule. 32 in all.
+  - Scratch runs on D-018's board (R5 and the SHT40 on the back):
+    - `drc_checks: 1`: order 5 failed (2 `starved_thermal`); escalation checked the other 7 and kept order 6; all gates pass.
+    - **No waivers (forced failure):** 3 + 5 checked, 8 more routed and checked, 16 in all.
+      - The report shows the 9 silkscreen items in 16 of 16 orders as "placement or rules".
+      - `starved_thermal` on J1 SH (2 of 16) and the dangling or unfinished SHT40 stubs (1–4 of 16) show as "routing luck".
+      - 16 log lines were written.
+- **Unchanged starter:** kept order 2 (3 checked, all clean, no escalation).
+  - Byte-identical `board.ses`, schematic, BOM, CPL and fab README.
+  - The DSN differs only in its own path on line 1.
+  - `routing.json` is identical apart from `router`; the board is identical apart from UUIDs.
+- `gates::drc_open` now returns KiCad's items rather than text; the check stage's printout is unchanged.
+
 ## D-019 pcbgen: the route stage checks its best candidates with KiCad's DRC (DECIDED, technical, 2026-09-29)
 - **Why:** the router's own numbers (unrouted, thin track, vias, length) can't see some faults. On D-018's scratch board, the order ranked best ran a track through the ground pour's spokes to the USB-C shell pads, and the full check failed with 2 `starved_thermal` errors. A different order would have passed.
 - **What:** after Freerouting has routed every order, the best `RouteOptions::drc_checks` of them (default 3) are each finished the way the kept one always was: tracks and vias, zone fill, stitching, fill. Each runs in its own copy of the project (`route/try-<n>/check/`) and gets the same DRC gate as the check stage: fab rules, schematic parity, the board's waivers.

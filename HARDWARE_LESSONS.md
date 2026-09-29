@@ -113,6 +113,11 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
 - **JLCPCB CPL rotations:** the community correction table is `matthewlai/JLCKicadTools/jlc_kicad_tools/cpl_rotations_db.csv` (the kicad-jlcpcb-tools plugin downloads it). Entries used here: `^SOT-223` +180, `^SOT-23` −90, `^USB_C_Receptacle_HRO_TYPE-C-31-M-12` +180. The ESP32-S3-WROOM-1, the SHT4x DFN, JST SH, TS-1187A switches, LEDs and SOD-123F have no entry (UNVERIFIED; check the JLCPCB preview).
 - **JLCPCB CPL, bottom side (UNVERIFIED with JLCPCB):** kicad-jlcpcb-tools writes a bottom part's rotation as 180 − KiCad's angle, then adds the same package correction, and uses the position as seen from the top (`fabrication.py`, `_rotation_for_match`, main branch read 2026-09-29). pcbgen's CPL follows it and lists every bottom part as UNVERIFIED for the preview check.
 
+- **A through-hole pad in a pour needs room for its thermal spokes (verified 2026-09-29, D-020).** On D-018's board, a routed track next to the USB-C shield pads (J1 SH) cut the GND pour's spokes to them: DRC `starved_thermal` (min 2 spokes, actual 1), in 1–2 of every 8 footprint orders. The route stage's DRC check and escalation usually find an order without it.
+  - If none is clean, `RouteOptions::pad_rings` keeps tracks and vias 1 mm off those pads, which removed it in 8 of 8 orders.
+  - The rings cost routability near the connector: more orders leave a signal unrouted, and routing takes about twice as long.
+- **Routing failures are logged per board** in `boards/<name>/route-failures.jsonl` (D-020). An error type failing on two boards becomes a prevention rule plus an entry here.
+
 ## Mistakes to avoid
 - **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
 - **Run a DRC before routing.** Courtyard overlaps, silk collisions and parity errors show up there, and they are cheaper to fix than after a 1-minute route.

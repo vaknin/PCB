@@ -71,6 +71,10 @@ const FIXES: &[(&[&str], &str)] = &[
     (&["copper_edge_clearance", "edge_clearance"], "Copper too close to the board edge. Move {parts} inward."),
     (&["courtyards_overlap"], "Parts overlap. Move {parts} apart; this is placement, routing can't fix it."),
     (&["tracks_crossing", "shorting_items"], "Two nets touch. Route more orders; if it repeats, move {parts} to open a path."),
+    (
+        &["track_dangling", "via_dangling"],
+        "The router left a stub with a loose end. Another order usually has none; if every order does, look at the tracks by {parts} in the render.",
+    ),
     (&["isolated_copper"], "An island of pour with no connection. Move {parts} to let the pour through, or stitch it."),
     (
         &["track_width", "via_diameter", "annular_width", "drill_out_of_range", "hole_size", "connection_width"],
@@ -146,7 +150,10 @@ pub fn report(board: &str, date: &str, origin: Pt, checked: &[(u64, Vec<Value>)]
                 .into_iter()
                 .flatten()
                 .map(|it| {
-                    let at = it["pos"]["x"].as_f64().zip(it["pos"]["y"].as_f64()).map(|(x, y)| json!([r2(x - origin.x), r2(y - origin.y)]));
+                    // a zone's position is just its outline's first corner
+                    let at = if s(&it["description"]).starts_with("Zone") { None } else { it["pos"]["x"].as_f64() }
+                        .zip(it["pos"]["y"].as_f64())
+                        .map(|(x, y)| json!([r2(x - origin.x), r2(y - origin.y)]));
                     json!({"description": it["description"], "at_mm": at})
                 })
                 .collect();
@@ -168,6 +175,7 @@ pub fn report(board: &str, date: &str, origin: Pt, checked: &[(u64, Vec<Value>)]
         "board": board,
         "date": date,
         "kept_order": kept,
+        "open_in_kept_order": checked.iter().find(|c| c.0 == kept).map_or(0, |c| c.1.len()),
         "checked_orders": checked.iter().map(|c| c.0).collect::<Vec<_>>(),
         "steps": steps,
         "positions": "at_mm: mm from the board's top-left corner, Y down, as a layout places parts",
@@ -182,7 +190,7 @@ pub fn summary(report: &Value) -> Vec<String> {
         "route failure: no checked order passes DRC ({} orders checked); kept order {} ({} open item(s) there)",
         report["checked_orders"].as_array().map_or(0, Vec::len),
         report["kept_order"],
-        items.iter().filter(|i| i["in_kept_order"] == true).count()
+        report["open_in_kept_order"]
     )];
     for i in &items {
         let at: Vec<String> = i["items"]
@@ -295,7 +303,8 @@ mod tests {
         serde_json::from_str(
             r#"[
   {"description": "Thermal relief connection to zone incomplete (zone min spoke count 2; actual 1)",
-   "items": [{"description": "PTH pad SH [GND] of J1", "pos": {"x": 120.68, "y": 146.3}, "uuid": "a"}],
+   "items": [{"description": "Zone 'GND_F.Cu' [GND] on F.Cu, priority 0", "pos": {"x": 100.05, "y": 100.05}, "uuid": "z"},
+             {"description": "PTH pad SH [GND] of J1", "pos": {"x": 120.68, "y": 146.3}, "uuid": "a"}],
    "severity": "error", "type": "starved_thermal"},
   {"description": "Clearance violation (netclass 'Default' clearance 0.1500 mm; actual 0.1200 mm)",
    "items": [{"description": "Track [/I2C_SDA] on F.Cu, length 3.2100 mm", "pos": {"x": 140.0, "y": 130.0}, "uuid": "b"},
@@ -349,7 +358,9 @@ mod tests {
         assert_eq!(items[1]["orders_hit"], json!([5, 6]));
         assert_eq!(items[1]["in_kept_order"], false);
         assert!(s(&items[1]["pattern"]).starts_with("some orders only"));
-        assert_eq!(items[1]["items"][0]["at_mm"], json!([20.68, 46.3]));
+        assert_eq!(items[1]["items"][0]["at_mm"], Value::Null); // the zone
+        assert_eq!(items[1]["items"][1]["at_mm"], json!([20.68, 46.3]));
+        assert_eq!(r["open_in_kept_order"], 2);
         assert_eq!(items[2]["type"], "clearance");
         assert_eq!(items[2]["in_kept_order"], true);
         assert!(summary(&r).len() == 1 + 3 * 3);
