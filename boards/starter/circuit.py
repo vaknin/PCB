@@ -75,8 +75,10 @@ def build() -> Circuit:
     v5 += d3["1"]        # cathode
     gnd += d3["2"]
 
-    f1 = c.part("F1", "Device:Polyfuse", "500mA", "Fuse:Fuse_1206_3216Metric",
-                lcsc="C720075", mpn="JK-nSMD050-30", block="USB-C input", rot=90)
+    # 0.75 A hold: Bourns publishes a derating table (0.61 A at 50 C, 0.52 A at 60 C); a
+    # 0.5 A PTC holds only ~0.35-0.40 A in a warm box, no margin over the ~0.35 A load (D-015)
+    f1 = c.part("F1", "Device:Polyfuse", "750mA", "Fuse:Fuse_1206_3216Metric",
+                lcsc="C89653", mpn="MF-NSMF075-2", block="USB-C input", rot=90)
     vbus += f1[1]
     v5 += f1[2]
 
@@ -102,7 +104,7 @@ def build() -> Circuit:
 
     # --- ESP32-S3 module ---------------------------------------------------
     u1 = c.part("U1", "RF_Module:ESP32-S3-WROOM-1", "ESP32-S3-WROOM-1-N16R8",
-                "RF_Module:ESP32-S3-WROOM-1", lcsc="C2913202", mpn="ESP32-S3-WROOM-1-N16R8",
+                "pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3", lcsc="C2913202", mpn="ESP32-S3-WROOM-1-N16R8",
                 block="ESP32-S3")
     v3 += u1["3V3"]
     gnd += u1["GND"]

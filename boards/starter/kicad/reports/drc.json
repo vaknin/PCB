@@ -1,7 +1,7 @@
 {
     "$schema": "https://schemas.kicad.org/drc.v1.json",
     "coordinate_units": "mm",
-    "date": "2026-09-29T09:54:48",
+    "date": "2026-09-29T14:36:51",
     "ignored_checks": [
         {
             "description": "Footprint has no courtyard defined",
@@ -43,7 +43,7 @@
                         "x": 114.0,
                         "y": 130.5
                     },
-                    "uuid": "def49e2d-8496-459b-9128-7b4c3d05f28d"
+                    "uuid": "d91fe069-576e-4a23-ad6d-97b5d2d2ffef"
                 },
                 {
                     "description": "Pad 1 [+5V] of TP1 on F.Cu",
@@ -51,7 +51,7 @@
                         "x": 114.0,
                         "y": 130.5
                     },
-                    "uuid": "899a5737-42f9-4f94-bd35-3ae5a33886d6"
+                    "uuid": "3f321ed0-f879-4ae6-acb4-ebf8e77995b1"
                 }
             ],
             "severity": "warning",
@@ -66,7 +66,7 @@
                         "x": 117.5,
                         "y": 130.5
                     },
-                    "uuid": "c0ed6768-b6ec-41dc-8b1d-0ffa5ffd3c77"
+                    "uuid": "6ac6ec3a-df3c-4f2d-8044-8f066fb2fce4"
                 },
                 {
                     "description": "Pad 1 [+3V3] of TP2 on F.Cu",
@@ -74,7 +74,7 @@
                         "x": 117.5,
                         "y": 130.5
                     },
-                    "uuid": "cd7c8677-f5e9-4106-b903-8dc3c512155d"
+                    "uuid": "b76d226d-acee-42ae-b8ae-8582d3e21ada"
                 }
             ],
             "severity": "warning",
@@ -89,7 +89,7 @@
                         "x": 121.0,
                         "y": 130.5
                     },
-                    "uuid": "78ac017b-8308-4474-85c6-53461fffec71"
+                    "uuid": "aac411d1-e4f7-4e62-9e80-27916fd668ee"
                 },
                 {
                     "description": "Pad 1 [GND] of TP3 on F.Cu",
@@ -97,30 +97,7 @@
                         "x": 121.0,
                         "y": 130.5
                     },
-                    "uuid": "61ee6561-f132-4dd0-9da7-3cbb50fcee64"
-                }
-            ],
-            "severity": "warning",
-            "type": "silk_over_copper"
-        },
-        {
-            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
-            "items": [
-                {
-                    "description": "Circle of TP5 on F.Silkscreen",
-                    "pos": {
-                        "x": 137.5,
-                        "y": 124.5
-                    },
-                    "uuid": "1bafeceb-368c-4f26-a734-a7b8941fb105"
-                },
-                {
-                    "description": "Pad 1 [/UART_RX] of TP5 on F.Cu",
-                    "pos": {
-                        "x": 137.5,
-                        "y": 124.5
-                    },
-                    "uuid": "b826c2a2-8139-468b-8381-7638fed54f68"
+                    "uuid": "8f99560f-5616-4055-8e59-881855524fc4"
                 }
             ],
             "severity": "warning",
@@ -135,7 +112,7 @@
                         "x": 137.5,
                         "y": 121.0
                     },
-                    "uuid": "46166ee4-6e4a-4c41-81e0-6509af53b867"
+                    "uuid": "c1dbe3a0-5a61-4a5c-9b32-32a5d96e1150"
                 },
                 {
                     "description": "Pad 1 [/UART_TX] of TP4 on F.Cu",
@@ -143,7 +120,30 @@
                         "x": 137.5,
                         "y": 121.0
                     },
-                    "uuid": "2188bb27-4d66-4e26-b0a2-5c2586fa7d84"
+                    "uuid": "1fc41857-72d8-4233-a00f-e721d14895f6"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask (rule 'JLCPCB: Pad to Silkscreen' clearance 0.1500 mm; actual 0.1400 mm)",
+            "items": [
+                {
+                    "description": "Circle of TP5 on F.Silkscreen",
+                    "pos": {
+                        "x": 137.5,
+                        "y": 124.5
+                    },
+                    "uuid": "522d9ebd-024f-468a-a7b4-591e700f06b8"
+                },
+                {
+                    "description": "Pad 1 [/UART_RX] of TP5 on F.Cu",
+                    "pos": {
+                        "x": 137.5,
+                        "y": 124.5
+                    },
+                    "uuid": "0c8c8455-0b93-4e2e-a1f6-24bb948b339d"
                 }
             ],
             "severity": "warning",
@@ -158,7 +158,7 @@
                         "x": 141.5,
                         "y": 129.0
                     },
-                    "uuid": "7ca89bff-7238-4be6-8516-c03644321467"
+                    "uuid": "f51b0a2c-c7ca-46f8-bb36-bc428bdc2cd0"
                 },
                 {
                     "description": "Pad 1 [/I2C_SDA] of TP6 on F.Cu",
@@ -166,7 +166,7 @@
                         "x": 141.5,
                         "y": 129.0
                     },
-                    "uuid": "183dba1e-8485-4b7c-a93e-f155410ec088"
+                    "uuid": "446fd5ab-3422-4c5a-96b2-77a2343d743b"
                 }
             ],
             "severity": "warning",
@@ -181,7 +181,7 @@
                         "x": 144.5,
                         "y": 129.0
                     },
-                    "uuid": "24c249cf-abbc-4961-a119-092f1764334d"
+                    "uuid": "cfed997d-2d20-4d12-92da-afdb9a115066"
                 },
                 {
                     "description": "Pad 1 [/I2C_SCL] of TP7 on F.Cu",
@@ -189,7 +189,7 @@
                         "x": 144.5,
                         "y": 129.0
                     },
-                    "uuid": "9fba9eaa-ddd3-4a1d-bfd9-4e10bbb9dad2"
+                    "uuid": "519954a4-1286-476d-95f5-21fde2238724"
                 }
             ],
             "severity": "warning",
@@ -201,56 +201,10 @@
                 {
                     "description": "Segment on Edge.Cuts",
                     "pos": {
-                        "x": 148.0,
-                        "y": 150.0
-                    },
-                    "uuid": "f156a908-e007-4cf7-a055-cad1c1f7437f"
-                },
-                {
-                    "description": "Segment of J1 on F.Silkscreen",
-                    "pos": {
-                        "x": 120.3,
-                        "y": 148.3
-                    },
-                    "uuid": "daa07b3f-bc41-4511-a8d2-52e3dc62c96a"
-                }
-            ],
-            "severity": "warning",
-            "type": "silk_edge_clearance"
-        },
-        {
-            "description": "Silkscreen clipped by board edge",
-            "items": [
-                {
-                    "description": "Segment on Edge.Cuts",
-                    "pos": {
-                        "x": 148.0,
-                        "y": 150.0
-                    },
-                    "uuid": "f156a908-e007-4cf7-a055-cad1c1f7437f"
-                },
-                {
-                    "description": "Segment of J1 on F.Silkscreen",
-                    "pos": {
-                        "x": 129.7,
-                        "y": 148.3
-                    },
-                    "uuid": "456423d8-cb23-4b44-91e3-b9bd9ad2aeb5"
-                }
-            ],
-            "severity": "warning",
-            "type": "silk_edge_clearance"
-        },
-        {
-            "description": "Silkscreen clipped by board edge",
-            "items": [
-                {
-                    "description": "Segment on Edge.Cuts",
-                    "pos": {
                         "x": 102.0,
                         "y": 100.0
                     },
-                    "uuid": "4b4aef27-d524-4889-b3f7-182dbb390c9a"
+                    "uuid": "39ccd4d0-a392-437b-a563-fec7f9545d1b"
                 },
                 {
                     "description": "Segment of U1 on F.Silkscreen",
@@ -258,7 +212,7 @@
                         "x": 115.8,
                         "y": 99.85
                     },
-                    "uuid": "f305d1d0-a1ac-430e-bd07-a363eba7de05"
+                    "uuid": "779e146a-62af-4ec6-8c86-af54acd76145"
                 }
             ],
             "severity": "warning",
@@ -273,7 +227,7 @@
                         "x": 102.0,
                         "y": 100.0
                     },
-                    "uuid": "4b4aef27-d524-4889-b3f7-182dbb390c9a"
+                    "uuid": "39ccd4d0-a392-437b-a563-fec7f9545d1b"
                 },
                 {
                     "description": "Segment of U1 on F.Silkscreen",
@@ -281,7 +235,53 @@
                         "x": 134.2,
                         "y": 99.85
                     },
-                    "uuid": "7508398b-30a0-4006-b8c7-00d602f3ece9"
+                    "uuid": "763dbf52-699d-4945-98ae-93f6bdf01b00"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_edge_clearance"
+        },
+        {
+            "description": "Silkscreen clipped by board edge",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 148.0,
+                        "y": 150.0
+                    },
+                    "uuid": "ae437fdd-4793-43c1-9da5-862ca03739c6"
+                },
+                {
+                    "description": "Segment of J1 on F.Silkscreen",
+                    "pos": {
+                        "x": 120.3,
+                        "y": 148.3
+                    },
+                    "uuid": "bcd72004-569b-4192-ba5c-db4a115d565a"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_edge_clearance"
+        },
+        {
+            "description": "Silkscreen clipped by board edge",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 148.0,
+                        "y": 150.0
+                    },
+                    "uuid": "ae437fdd-4793-43c1-9da5-862ca03739c6"
+                },
+                {
+                    "description": "Segment of J1 on F.Silkscreen",
+                    "pos": {
+                        "x": 129.7,
+                        "y": 148.3
+                    },
+                    "uuid": "173a3c94-bdb0-4b5a-8ad8-546c17a63e94"
                 }
             ],
             "severity": "warning",

@@ -17,8 +17,8 @@ With no stage named, all stages run in order, each in its own process (a crash i
 | Stage | Does | Output |
 |---|---|---|
 | sch | writes `.kicad_pro` + `.kicad_dru` (fab rules), then the schematic; refuses if any pin is neither connected nor marked nc; then the netlist round-trip and net-class gates | `kicad/<name>.kicad_sch` |
-| pcb | exports the netlist from the schematic, loads footprints, places them from `layout.SPEC`, adds outline, GND pours, labels, escape stubs | `kicad/<name>.kicad_pcb` |
-| route | DSN export (pours hidden from the router) → Freerouting (up to 3 tries) → SES import → kicad-cli zone fill → GND stitching vias → fill; each SWIG step in its own process | same file; work files in `kicad/route/` |
+| pcb | exports the netlist from the schematic, loads footprints, places them from `layout.SPEC`, adds outline, GND pours, local copper zones (`CopperZone`), labels, escape stubs | `kicad/<name>.kicad_pcb` |
+| route | DSN export (pours hidden from the router) → Freerouting (up to 3 tries) → SES import → kicad-cli zone fill → stitching vias (GND, plus `stitch_local` nets) → fill; each SWIG step in its own process | same file; work files in `kicad/route/` |
 | check | netlist round trip, net-class patterns, ERC, DRC (JLCPCB rules, schematic parity), routing report; fails on any error, unwaived warning, unrouted connection or copper in a keep-out | `kicad/reports/{erc,drc,routing}.json` |
 | fab | gerbers + drill (zip), JLCPCB BOM and CPL with rotation corrections; lists parts whose rotation is UNVERIFIED | `fab/` (see `fab/README.md`) |
 
@@ -31,13 +31,14 @@ With no stage named, all stages run in order, each in its own process (a crash i
   - `c.pwr_flag(net)` marks a net as driven from off the sheet.
 - `layout.py`:
   - `RULES`: net classes.
-  - `SPEC`: board size, the `Place(x, y, rot)` for every reference in mm from the top-left with Y down, and silk `Text` labels.
+  - `SPEC`: board size, the `Place(x, y, rot)` for every reference in mm from the top-left with Y down, silk `Text` labels, and `CopperZone`s (local pours of one net, e.g. regulator cooling copper; filled above GND).
   - `ROUTE`: Freerouting and stitching options.
   - `WAIVERS`: `(type, substring, reason)` entries.
+- Modified footprints go in `lib/footprints/<Lib>.pretty` (repo root); the `sch` stage points the project's fp-lib-table there for any library of that name. Currently `pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3` (D-015).
 
 ## Status (2026-09-29, starter board)
 - **All gates pass on a clean end-to-end run:** netlist round trip, ERC 0, DRC 0 open (11 waived cosmetic silk warnings), routing 0 unrouted and no copper in keep-outs.
-- **Routing:** 20 signal vias + 74 GND vias, ~675 mm of track. Bottom GND pour is one piece covering 78% of the board.
+- **Routing (after D-015):** 20 signal vias, 20 +3V3 cooling vias, 54 GND vias, ~670 mm of track. Bottom GND pour is one piece covering 73% of the board. Smallest hole 0.3 mm.
 - **Fab files:** made. 8 parts have UNVERIFIED rotations (listed in `fab/README.md`).
 - **Datasheet check and blind review done** (D-014). Before any order: check rotations in JLCPCB's preview, the fab's own manufacturability check, and the owner's OK on cost.
 - **Phase 1 is closed.** The starter board is a tooling test; it will not be ordered unless the owner asks.

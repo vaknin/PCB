@@ -22,5 +22,5 @@ Check each of these in JLCPCB's placement preview (pin 1 marker) before paying.
 - J2 (JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal)
 - SW1 (SW_Push_1P1T_XKB_TS-1187A)
 - SW2 (SW_Push_1P1T_XKB_TS-1187A)
-- U1 (ESP32-S3-WROOM-1)
+- U1 (ESP32-S3-WROOM-1_EPAD-Drill0.3)
 - U4 (Sensirion_DFN-4_1.5x1.5mm_P0.8mm_SHT4x_NoCentralPad)

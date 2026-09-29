@@ -12,7 +12,7 @@ bottom-right, the spot furthest from the regulator and the module (both run
 warm); the Qwiic port is on the right edge above it.
 """
 
-from pcbgen.pcb import BoardSpec, Place, Text
+from pcbgen.pcb import BoardSpec, CopperZone, Place, Text
 from pcbgen.project import BoardRules, NetClass
 from pcbgen.route import RouteOptions
 
@@ -36,7 +36,7 @@ SPEC = BoardSpec(
     places={
         # ESP32-S3 module
         "U1": Place(MOD_X, MOD_Y),
-        "C3": Place(13.2, 9.0, 90),        # 10u at the 3V3 pad (pad 2 at x=16.25, y=8.76)
+        "C3": Place(13.2, 9.0, 90),        # 22u at the 3V3 pad (D-014) (pad 2 at x=16.25, y=8.76)
         "C4": Place(13.2, 12.6, 90),       # 100n
         "R4": Place(12.0, 16.5, 0),        # EN pull-up (EN = pad 3 at y=10.03)
         "C5": Place(12.0, 19.0, 0),        # EN delay cap
@@ -77,6 +77,11 @@ SPEC = BoardSpec(
         "H1": Place(4.0, 10.0), "H2": Place(W - 4.0, 10.0),
         "H3": Place(4.0, H - 4.0), "H4": Place(W - 4.0, H - 4.0),
     },
+    # Cooling copper for the regulator: its tab (pad 2, +3V3, at (7.5, 22.85)) spreads heat
+    # into a +3V3 pour on both layers, tied together by the vias from ROUTE.stitch_local.
+    # ~0.4 W at 0.25 A (inferred). Above the GND pours in priority; parts inside it
+    # (R4, C5, U2's other pads) keep their clearance.
+    zones=[CopperZone("+3V3", 1.0, 14.0, 13.0, 26.0)],
     # Owner-facing labels (reference designators live on the fab layer)
     texts=[
         Text("5V", 14.0, 28.8, 1.0), Text("3V3", 17.5, 28.8, 1.0), Text("GND", 21.0, 28.8, 1.0),
@@ -89,7 +94,7 @@ SPEC = BoardSpec(
     ],
 )
 
-ROUTE = RouteOptions()
+ROUTE = RouteOptions(stitch_local={"+3V3": 2.0})
 
 # (DRC/ERC violation type, text that must appear in the violation, reason)
 WAIVERS: list[tuple[str, str, str]] = [

@@ -23,7 +23,9 @@ Anything unverified goes in `DECISIONS.md` open questions or is tagged UNVERIFIE
 | H5VUT2U | pin 3 = GND **confirmed** ("pin1 or pin2 to pin3", "I/O pin to GND") | Hongjiacheng datasheet Rev 2.0, p.2 | 2026-09-29 |
 | SMF5.0A | cathode band; VRWM 5 V, VBR 6.4–7.0 V, clamps at 9.2 V | SMF datasheet Rev 2.2, p.2 | 2026-09-29 |
 | Qwiic (JST SH 4-pin) | 1 GND, 2 3.3 V, 3 SDA, 4 SCL (from SparkFun's design file; their web pages give only wire colours) | github.com/sparkfunX/Qwiic_Adapter Eagle schematic | 2026-09-29 |
-| JK-nSMD050 PTC | 0.5 A hold / 1 A trip at 25 °C, up to 1 Ω after soldering; no derating table (a hot enclosure could cause nuisance trips, inferred) | Jinrui datasheet, Table 2 | 2026-09-29 |
+| JK-nSMD050 PTC | 0.5 A hold / 1 A trip at 25 °C, up to 1 Ω after soldering; no derating table (a hot enclosure could cause nuisance trips, inferred). Replaced on the starter by MF-NSMF075-2 (D-015) | Jinrui datasheet, Table 2 | 2026-09-29 |
+| Bourns MF-NSMF075-2 (C89653) | 1206 PTC: 0.75 A hold / 1.5 A trip at 23 °C, 6 V, R1max 0.40 Ω, trips ≤ 0.2 s at 8 A. Hold vs ambient: 0.67 A at 40 °C, 0.61 A at 50, 0.52 A at 60, 0.50 A at 70. Its 0.5 A sibling (MF-NSMF050) holds 0.40 A at 50 °C and 0.35 A at 60; Littelfuse 1206L050 is about the same | Bourns MF-NSMF datasheet REV AF, p.1 and derating table p.3; Littelfuse 1206L datasheet p.2 | 2026-09-29 |
+| KiCad `RF_Module:ESP32-S3-WROOM-1` | EPAD (pad 41) is a 3.9 mm SMD pad plus 12 plated holes (0.2 mm drill, 0.6 mm pad, tented on the back) in the gaps of a 3×3 grid of 0.9 mm paste squares. This matches Espressif's land pattern (Fig. 11-1: 12 "via for thermal pad", no size given). Espressif's design guidelines recommend vias in the gaps but don't require them | footprint file; WROOM-1 datasheet v1.8 p.45; ESP32-S3 HW design guidelines, PCB layout | 2026-09-29 |
 
 Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a separate agent that didn't build the design).
 
@@ -34,6 +36,12 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - setup $8.18, stencil $1.53, $0.0016 per joint
   - $3.07 per unique Extended part; Basic and Preferred-Extended parts are free
   - (2026-09-09 help page)
+- **JLCPCB small holes (2 layers, 50×50, qty 5):**
+  - The capabilities page says only 0.1/0.15 mm holes, and 0.2/0.25 mm holes on pads under 0.45 mm, cost extra.
+  - The quote form's "Min via hole size" option is different: 0.3 mm is free ($4.00 board). 0.2 mm adds $16.85 plus $16.56 via covering plus a $16.71 Kelvin test ($54.12).
+  - So keep every hole ≥ 0.3 mm (the pcbgen ESP32 footprint does, D-015).
+  - (quote form and capabilities page, 2026-09-29)
+- **JLCPCB has no Basic resettable (PTC) fuses.** Every 1206/1210 PTC is Extended, including JK-nSMD050-30 (C720075) and MF-NSMF075-2 (C89653) (jlcpcb.com parts search and part pages, 2026-09-29).
 - **JLCPCB → Israel:**
   - FedEx ~$30 (6–9 business days), DHL ~$102.
   - No DDP, so VAT is paid on import. An Israeli ID is needed for customs.
@@ -79,6 +87,7 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
 - **SWIG "memory leak of type PCB_TRACK/PCB_VIA" lines** at exit are harmless noise. Filter them with `grep -v "swig/python detected"`.
 - **KiCad 11 removes the SWIG `pcbnew` module** (DSN export, SES import, zone fill, stitching all use it). Arch upgrades KiCad on a normal `pacman -Syu`. When KiCad 11 lands, either hold the package or port `pcb.py`/`route.py` to the IPC API (which needs the GUI) or direct file editing. Timing is not yet confirmed.
 - **Freerouting and footprint keep-outs:** Freerouting routes to pad *centres*. A footprint keep-out with only a pad-sized notch (SHT40) makes those pads unroutable; a locked escape stub fixes it (D-010). Freerouting's log "N unrouted" is the first thing to read.
+- **Modified footprints live in their own library** (`lib/footprints/<Lib>.pretty`, found by the `sch` stage). With a new name in its own library, DRC's `lib_footprint_mismatch` compares the footprint with itself, so no waiver is needed (verified on the 0.3 mm ESP32 copy, 2026-09-29).
 - **Editing a library footprint's silk** (to fix clearance warnings) triggers DRC `lib_footprint_mismatch`. Waive cosmetic silk items with a reason instead.
 - **All KiCad `TestPoint_Pad_*` footprints** put the silk ring 0.14 mm from the pad, under JLCPCB's 0.15 mm guideline (waived; cosmetic).
 - **DRC schematic parity** expects no-connect pads to carry KiCad's `unconnected-(...)` nets, and footprint `Datasheet` fields to match the symbol's.

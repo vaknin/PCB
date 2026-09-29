@@ -38,6 +38,23 @@ class Keepout:
 
 
 @dataclass
+class CopperZone:
+    """A local copper pour of one net (e.g. cooling copper under a regulator tab).
+
+    Filled above the GND pours (higher priority). The router never sees it (route.py
+    hides every pour), so tracks may cross the area and the fill flows around them;
+    vias tying its layers together come from `RouteOptions.stitch_local`.
+    """
+    net: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    layers: tuple[str, ...] = ("F.Cu", "B.Cu")
+    priority: int = 10        # the GND pours use 0 and 1
+
+
+@dataclass
 class Text:
     text: str
     x: float
@@ -54,6 +71,7 @@ class BoardSpec:
     corner_radius: float = 1.0
     places: dict[str, Place] = field(default_factory=dict)
     keepouts: list[Keepout] = field(default_factory=list)
+    zones: list[CopperZone] = field(default_factory=list)
     texts: list[Text] = field(default_factory=list)
     gnd_net: str = "GND"
     gnd_layers: tuple[str, ...] = ("F.Cu", "B.Cu")
@@ -260,6 +278,23 @@ def build(project_dir: Path, name: str, spec: BoardSpec) -> Path:
             z.SetThermalReliefSpokeWidth(mm(0.4))
             z.SetAssignedPriority(i)
             borrowed(z.Outline()).Append(_rect_poly(0, 0, spec.width, spec.height))
+            board.Add(z)
+
+    for cz in spec.zones:
+        if cz.net not in nets:
+            raise ValueError(f"copper zone net {cz.net} is not in the netlist")
+        for layer in cz.layers:
+            z = pcbnew.ZONE(board)
+            z.SetLayer(getattr(pcbnew, layer.replace(".", "_")))
+            z.SetNet(nets[cz.net])
+            z.SetZoneName(f"{cz.net}_{layer}")
+            z.SetLocalClearance(mm(0.3))
+            z.SetMinThickness(mm(0.25))
+            z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)   # as the GND pours
+            z.SetThermalReliefGap(mm(0.3))
+            z.SetThermalReliefSpokeWidth(mm(0.4))
+            z.SetAssignedPriority(cz.priority)
+            borrowed(z.Outline()).Append(_rect_poly(cz.x0, cz.y0, cz.x1, cz.y1))
             board.Add(z)
 
     for t in spec.texts:

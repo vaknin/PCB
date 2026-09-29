@@ -103,15 +103,15 @@ def build(project_dir: Path, name: str, rules: BoardRules, gnd_net: str = "GND")
         if w < nc.track - 1e-6:
             thin[net] = thin.get(net, 0.0) + math.dist(a, b)
 
-    # pours: pieces and filled fraction per GND layer
+    # pours (GND and any local copper zones): pieces and filled fraction per net and layer
     pours = {}
     for z in find_all(board, "zone"):
-        if find(z, "net") is None or find(z, "net")[1] != gnd_net or find(z, "keepout") is not None:
+        if find(z, "net") is None or find(z, "keepout") is not None:
             continue
         layer = find(z, "layer")[1]
         outline = _area(_pts(find(z, "polygon")))
         pieces = sorted((_area(_pts(fp)) for fp in find_all(z, "filled_polygon")), reverse=True)
-        pours[layer] = {
+        pours[f"{find(z, 'net')[1]} {layer}"] = {
             "pieces": len(pieces),
             "filled_pct": round(100 * sum(pieces) / outline, 1),
             "largest_piece_pct_of_fill": round(100 * pieces[0] / sum(pieces), 1) if pieces else 0.0,
@@ -128,19 +128,20 @@ def build(project_dir: Path, name: str, rules: BoardRules, gnd_net: str = "GND")
         "vias_total": len(vias),
         "vias_gnd": sum(1 for v in vias if v[2] == gnd_net),
         "vias_signal": sum(1 for v in vias if v[2] != gnd_net),
+        "vias_by_net": {n: sum(1 for v in vias if v[2] == n) for n in sorted({v[2] for v in vias})},
         "copper_in_keepouts": in_keepout,
         "thinner_than_class_mm": {k: round(v, 1) for k, v in sorted(thin.items())},
-        "gnd_pours": pours,
+        "pours": pours,
     }
 
 
 def run(project_dir: Path, name: str, rules: BoardRules) -> bool:
     r = build(project_dir, name, rules)
     (project_dir / "reports" / "routing.json").write_text(json.dumps(r, indent=2) + "\n")
-    print(f"== ROUTING: {r['unrouted_connections']} unrouted, {r['vias_signal']} signal vias + "
+    print(f"== ROUTING: {r['unrouted_connections']} unrouted, {r['vias_signal']} non-GND vias + "
           f"{r['vias_gnd']} GND vias, track length {r['track_length_mm']} mm")
-    for layer, p in r["gnd_pours"].items():
-        print(f"   GND pour {layer}: {p['filled_pct']}% of the board filled, {p['pieces']} piece(s), "
+    for key, p in r["pours"].items():
+        print(f"   pour {key}: {p['filled_pct']}% of its outline filled, {p['pieces']} piece(s), "
               f"largest {p['largest_piece_pct_of_fill']}% of it")
     for net, mm_ in r["thinner_than_class_mm"].items():
         print(f"   note: {mm_} mm of {net} track is thinner than its net class")

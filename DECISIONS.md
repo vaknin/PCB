@@ -3,6 +3,27 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-015 Starter board: the three "before a real order" fixes from D-014 (DECIDED, technical, 2026-09-29)
+The owner said "just fix for now": no order and no cost table yet. Research: `research/2026-09-29-holes-and-fuse.md`, done by a separate agent with sources tagged VERIFIED/INFERRED.
+- **Regulator cooling copper:**
+  - U2's tab (+3V3) now sits in a +3V3 pour on both layers, x 1–13 / y 14–26 mm. It is filled above the GND pours (priority 10) and tied together by 20 vias on a 2 mm grid.
+  - New pcbgen features, reusable on any board: `CopperZone` in `BoardSpec.zones`, and `RouteOptions.stitch_local` (net → via pitch). Stitching runs per net. The router still sees no pours, so +3V3 is fully routed with tracks and the pour comes on top. Unlike GND, unrouted +3V3 connections still count.
+  - `routing.json` now reports every pour by net and layer (`pours`, which replaces `gnd_pours`) and `vias_by_net`.
+  - Heat estimate (INFERRED, not measured): about 12×12 mm of copper on both sides plus vias should roughly halve the reviewer's 50–70 °C rise at 0.4 W. Measure it on a real board.
+- **ESP32 EPAD holes: local footprint with 0.3 mm drills** (`lib/footprints/pcbgen.pretty/ESP32-S3-WROOM-1_EPAD-Drill0.3`). It is KiCad's footprint with only the 12 drills changed (0.2 → 0.3 mm) plus a new name and description. The positions, the 0.6 mm pads and the window-pane paste all stay.
+  - Why: JLCPCB's capabilities page says a 0.2 mm hole on a pad of 0.45 mm or more is free. But on its quote form, the "0.2 mm" min-via option adds about $50 (drill, via covering and Kelvin test) to a $4 board. 0.3 mm is the form's stated free size, so the risk goes away.
+  - Espressif recommends vias in the EPAD gaps (datasheet Fig. 11-1, 12 vias, no size given).
+  - It is a separate library, so DRC `lib_footprint_mismatch` compares it with itself and no waiver is needed.
+  - The annular ring is now 0.15 mm, below JLCPCB's 0.25 mm PTH recommendation but above the via minimum, and DRC with JLCPCB's rules passes (the ring INFERRED to be fine, since these are via-like holes inside copper).
+  - The board's smallest hole is now 0.3 mm.
+- **Fuse: F1 is now Bourns MF-NSMF075-2 (C89653)**, a 0.75 A hold / 1.5 A trip part, 6 V, 0.40 Ω max. It replaces the JK-nSMD050-30.
+  - Bourns' own derating table gives 0.61 A hold at 50 °C and 0.52 A at 60 °C. A 0.5 A PTC holds only 0.35–0.40 A there (Bourns and Littelfuse tables), which is no margin over the ~0.35 A average load.
+  - It still trips about 1 s at 2 A and 0.2 s at 3 A (read off a chart, INFERRED), so it still protects against a board short.
+  - No fee change: the old part was already Extended, and JLCPCB has no Basic PTC fuses at all. $0.037 each, 17,850 in stock (2026-09-29).
+  - 6 V rating over USB's 5.25 V; the TVS after it clamps spikes. Fallback if a higher rating is ever wanted: BHFUSE BSMD1206-075-16V (C883128). Its derating was not checked.
+- **Result:** clean full run. Netlist and net classes PASS, ERC 0, DRC 0 open (the same 11 waived silk warnings), 0 unrouted, no copper in keep-outs.
+- **Still open before any order:** the 8 UNVERIFIED rotations in JLCPCB's preview (D3 matters most), and the A/B/C cost table. At upload, confirm the quote keeps "Min via hole size" at 0.3 mm with no extra lines.
+
 ## D-014 Starter board changes after the datasheet check and blind review (DECIDED, technical, 2026-09-29)
 Reports: `research/2026-09-29-datasheet-check.md` (every pin VERIFIED) and `research/2026-09-29-blind-review.md`.
 - **Capacitors on 3V3:** C3 at the module is now 22 µF and C2 at the regulator 1 µF (were 10 µF and 22 µF). This follows Espressif's 22 µF + 0.1 µF at the module. It also brings the total (~23 µF nominal, less under 3.3 V bias; inferred) back to the edge of ST's LDL1117 stability plot, which only covers 1–22 µF. The board had 32 µF.
@@ -10,7 +31,7 @@ Reports: `research/2026-09-29-datasheet-check.md` (every pin VERIFIED) and `rese
 - **C1 moved** under U2, next to its input pin (it was ~7 mm away, reached through vias).
 - **USB net class never applied:** its patterns `USB_D+` didn't match KiCad's `/USB_D+`. Now `*USB_D*`. A new `netclasses` gate (in `sch` and `check`) fails when any pattern matches no net, and was checked against the old patterns.
 - **Stitching vias** now check their distance to other-net tracks directly (≥ 0.25 mm). One via ended up 0.185 mm from a track even though it was inside the pour; cause not found.
-- **Deferred to "before a real order":**
+- **Deferred to "before a real order"** (all three done in D-015):
   - Extra 3V3 copper under the regulator tab for cooling. The reviewer estimates a 50–70 °C rise at 0.4 W (inferred).
   - The fuse's hot-derating margin (no derating curve in its datasheet).
   - The 12 × 0.2 mm thermal-via holes in KiCad's ESP32-S3-WROOM-1 footprint. JLCPCB allows them but charges extra for holes under 0.3 mm. Check the quote.
@@ -167,10 +188,9 @@ at JLCPCB (the 5-board price covers up to 100×100).
 - (Firmware language: closed by D-009.)
 - **Before a real order (skipped while this is a tooling test, agreed with pcb-99):**
   - a 4-layer routing variant for comparison
-  - vendoring the verified footprints into the repo
+  - vendoring the verified footprints into the repo (`lib/footprints/` exists since D-015; only the modified ESP32 footprint is there)
   - a full JLCPCB parts/cost script
   - (project skill: done as the global draft `~/.claude/skills/pcb-pipeline/SKILL.md`, at the owner's request)
-  - from D-014: 3V3 copper under the LDO tab for cooling; the PTC fuse's hot-derating margin; the ESP32 footprint's 0.2 mm holes (extra JLCPCB fee?)
   - check every UNVERIFIED rotation in JLCPCB's placement preview (list in `boards/<name>/fab/README.md`)
   - the fab's own manufacturability check on upload; current fab promotions (NextPCB Rev 0 vs JLCPCB); the A/B/C cost table from `docs/brief.md`
 - **KiCad 11 port** (SWIG pcbnew removed): write the `.kicad_pcb` directly (D-011 step 2), keep DSN/SES as the only other SWIG steps, or use KiCad 11's headless IPC API. Consider Rust for the generator then, if the pipeline becomes permanent (see the skill).

@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .kicad import borrowed, fill_zones, pcbnew, run_step
@@ -31,6 +31,9 @@ class RouteOptions:
     stitch_pitch: float = 3.0         # mm grid for stitching vias
     stitch_via: tuple[float, float] = (0.6, 0.3)   # diameter, drill (mm)
     stitch_clearance: float = 0.25    # mm from a stitching via to other-net tracks
+    # local pours of other nets (layout.CopperZone, e.g. regulator cooling copper): net ->
+    # via pitch (mm). Unlike the main pour net, their unrouted connections still count.
+    stitch_local: dict[str, float] = field(default_factory=dict)
 
 
 def route(pcb_path: Path, opts: RouteOptions) -> Path:
@@ -69,7 +72,7 @@ def route(pcb_path: Path, opts: RouteOptions) -> Path:
 
     run_step("pcbgen.route", "import-ses", str(pcb_path), str(ses))
     fill_zones(pcb_path)
-    if opts.stitch_net:
+    if opts.stitch_net or opts.stitch_local:
         run_step("pcbgen.route", "stitch", str(pcb_path), json.dumps(asdict(opts)))
         fill_zones(pcb_path)
     return pcb_path
@@ -113,9 +116,11 @@ def _import_ses(pcb_path: Path, ses: Path) -> None:
 
 def _stitch(pcb_path: Path, opts: RouteOptions) -> None:
     board = pcbnew.LoadBoard(str(pcb_path))   # zones come filled by kicad-cli
-    n = stitch(board, opts)
+    nets = ({opts.stitch_net: opts.stitch_pitch} if opts.stitch_net else {}) | opts.stitch_local
+    for net, pitch in nets.items():
+        n = stitch(board, opts, net, pitch)
+        print(f"stitching: {n} {net} vias")
     pcbnew.SaveBoard(str(pcb_path), board)
-    print(f"stitching: {n} {opts.stitch_net} vias")
 
 
 def _unrouted(log: Path, pour_net: str | None) -> list[str]:
@@ -127,7 +132,7 @@ def _unrouted(log: Path, pour_net: str | None) -> list[str]:
     return [n for n in re.findall(r"Net '(.+)' \(\d+ unrouted", text) if n != pour_net]
 
 
-def stitch(board: pcbnew.BOARD, opts: RouteOptions) -> int:
+def stitch(board: pcbnew.BOARD, opts: RouteOptions, net_name: str, pitch: float) -> int:
     """Drop vias on a grid wherever one fits entirely inside the net's filled pour on
     both outer layers, outside every courtyard and clear of other holes.
 
@@ -136,8 +141,8 @@ def stitch(board: pcbnew.BOARD, opts: RouteOptions) -> int:
     kept each via clear of other nets; staying outside courtyards keeps vias out of pads.
     """
     mm = pcbnew.FromMM
-    zones = [z for z in board.Zones() if not z.GetIsRuleArea() and z.GetNetname() == opts.stitch_net]
-    net = board.FindNet(opts.stitch_net)
+    zones = [z for z in board.Zones() if not z.GetIsRuleArea() and z.GetNetname() == net_name]
+    net = board.FindNet(net_name)
     dia, drill = (mm(v) for v in opts.stitch_via)
     per_layer: dict[int, list] = {}
     for z in zones:
@@ -164,7 +169,7 @@ def stitch(board: pcbnew.BOARD, opts: RouteOptions) -> int:
     pad_gap = dia // 2 + mm(0.2)
     # the fill alone didn't keep one via clear of a track (0.185 mm to /EN, rule 0.2):
     # check other-net copper directly, at the largest class clearance plus a margin
-    others = [t for t in board.GetTracks() if t.GetNetname() != opts.stitch_net]
+    others = [t for t in board.GetTracks() if t.GetNetname() != net_name]
     track_gap = dia // 2 + mm(opts.stitch_clearance)
 
     def fits(p: pcbnew.VECTOR2I, in_courtyard: bool = False) -> bool:
@@ -192,7 +197,7 @@ def stitch(board: pcbnew.BOARD, opts: RouteOptions) -> int:
 
     bb = board.GetBoardEdgesBoundingBox()
     added = 0
-    for p in grid(bb.GetLeft(), bb.GetTop(), bb.GetRight(), bb.GetBottom(), mm(opts.stitch_pitch)):
+    for p in grid(bb.GetLeft(), bb.GetTop(), bb.GetRight(), bb.GetBottom(), mm(pitch)):
         if fits(p):
             add(p)
             added += 1

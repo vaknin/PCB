@@ -7959,7 +7959,7 @@
 				)
 			)
 		)
-		(property "Value" "500mA"
+		(property "Value" "750mA"
 			(at 45.72 176.149 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8001,7 +8001,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C720075"
+		(property "LCSC" "C89653"
 			(at 45.72 172.72 0)
 			(hide yes)
 			(show_name no)
@@ -8012,7 +8012,7 @@
 				)
 			)
 		)
-		(property "MPN" "JK-nSMD050-30"
+		(property "MPN" "MF-NSMF075-2"
 			(at 45.72 172.72 0)
 			(hide yes)
 			(show_name no)
@@ -12520,7 +12520,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "RF_Module:ESP32-S3-WROOM-1"
+		(property "Footprint" "pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3"
 			(at 149.86 68.58 0)
 			(hide yes)
 			(show_name no)
