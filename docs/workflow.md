@@ -14,6 +14,14 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
 - One at a time: anything that costs money or quota, the gates on one board directory, and questions to the owner.
 - Claude reads each agent's report and then runs the whole check itself; an agent saying "passes" is not a gate.
 
+**Right the first time** (owner's request, 2026-09-30): a mistake found after the order costs a second shipment, so before freeze:
+- Every risk is sorted by what fixing it would cost: firmware only (free, over USB or Wi-Fi), rework on the delivered board, or a new board. The rounds exist to empty the last group.
+- The owner is asked, on a choice page, what the device might be wanted to do later. Each plausible wish gets its hardware hook now (a sense line, a spare pin on a pad, storage room, two update slots), even if its firmware waits.
+- Rev A firmware can update itself over Wi-Fi with rollback, and reports battery level, version and its last error somewhere the owner already looks.
+- **The readiness page** (an Artifact, shown before the freeze question): each requirement with how it was proven (simulated, datasheet-verified by the independent checker, measured on the dev board, or not provable before delivery), every open UNVERIFIED or INFERRED item, and what a miss would cost. An unproven item that would need a new board is red, and red blocks freeze unless the owner accepts it by name.
+- Independent agents (datasheet checker, blind reviewer, red team) each review without the designer's reasoning.
+- What simulation can't prove (radio range, microphone sound, real sleep current, how the case feels) is said plainly on the page.
+
 ## 2. Spec: `boards/<name>/spec.md` + `board.toml`
 - **`spec.md`** is plain Markdown on a fixed template (`templates/spec.md`):
   - purpose; where it lives
