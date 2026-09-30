@@ -169,6 +169,20 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - Freerouting's log can say "1 unrouted" on a board KiCad's DRC finds fully connected (capture-clip orders 0 and 3). The DRC is the gate.
   - `Button_Switch_SMD:SW_Push_1TS009xxxx…` prints a literal "REF**" on the silkscreen (cosmetic; seen on capture-clip's render).
 
+- **A crashing simulator must not look like a desktop crash (verified 2026-09-30, `scripts/nodump.c`, `scripts/nodump.sh`):**
+  - systemd-coredump logs every SIGSEGV (and Omarchy raises a "Process crashed" notice) whatever the core limit is: `ulimit -c 0` and a limit of 1 both still gave a coredump entry.
+  - A process that is non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`) leaves no entry, and its exit status is unchanged (−11 still reaches the parent). `LD_PRELOAD="$(scripts/nodump.sh)"` does that to a child without touching its code. Set it in the QEMU child's environment only.
+  - Used by `Console::start` in `crates/pcbgen/src/sim.rs` (so by `sim` and devctl `--qemu`), `firmware/spikes/codec/run.sh` and `boards/capture-clip/firmware/sim/run.py`.
+- **QEMU 9.2.2 (esp_develop) host crash in the TCG block lookup (seen twice 2026-09-30, both in capture-clip's `rollback` scenario):** `tb_tc_cmp ← q_tree_find_node ← tcg_tb_lookup ← cpu_io_recompile ← io_prepare ← do_ld_4 ← helper_ldul_mmu` (a device read that makes QEMU re-translate the block). This is not the `psram_quad_read` crash above. QEMU's fault, not the firmware's; real boards are unaffected.
+- **ESP32-S3 on the dev board (measured 2026-09-30 by the dev-board agent, `firmware/spikes/codec/RESULTS-devboard.md`; not re-run by the main session):**
+  - **Opening the USB Serial/JTAG port from pyserial resets the chip** unless RTS is dropped before DTR (`s.dtr, s.rts = True, False; s.open(); s.dtr = False`). Symptom: reset reason always USB (11), state lost between commands.
+  - **Deep-sleep wake re-checks the whole app image** unless `CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP=y`: about 170 ms per MB of app on every wake. With it and the bootloader/ROM logs off, timer wake → `app_main` is 40 ms (n = 5); without, 325 ms for a 1.35 MB app. Reset → `app_main`: 260–360 ms.
+  - **`CONFIG_SPIRAM_MEMTEST` adds 0.52 s to every boot and wake** with 8 MB PSRAM (not the ~2 s guessed above). Keep it off; test PSRAM in the self-test.
+  - **A full passive Wi-Fi scan takes 1.69 s** (120 ms per channel): don't scan on every upload.
+  - **`-O2`, QIO flash and larger caches** (`sdkconfig.fast`) cut boot by 40 ms and Opus encode time by 6–20 %. Opus at complexity 0 or 1 runs at 0.27–0.31 of real time at 240 MHz (worst frame 9–11 ms), 0.37–0.44 at 160 MHz; 80 MHz overruns frames. An OGG made on the chip decodes completely (21.42 s).
+  - **Flashing a smaller image leaves the end of a bigger earlier one in flash** (INFERRED from how esptool writes): erase the app slot first when the earlier image held anything private.
+  - **`idf.py flash` builds first.** On a shared machine flash with `esptool write-flash @flash_args`, and serialise IDF builds with `flock` (parallel builds ran out of memory).
+
 ## Mistakes to avoid
 - **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
 - **Run a DRC before routing.** Courtyard overlaps, silk collisions and parity errors show up there, and they are cheaper to fix than after a 1-minute route.

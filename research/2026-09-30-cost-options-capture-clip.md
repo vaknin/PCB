@@ -177,3 +177,25 @@ Items 1–3 and 7 of the first pass are now filled in above (sections 3–6). St
 5. **Ask JLCPCB support:** do My Parts Lib / consigned parts pay the Extended fee on each order? Is the fee charged once when two orders in one cart use the same part?
 6. **Before adopting any swap:** re-run the datasheet check for the new part (TS-1187A footprint, RB160M-30 leakage when warm, T3902 pin 1), the case fit, and `cost`. Check the three-LED look with the owner on a choice page (R7's colours change).
 7. **Not re-verified today:** FedEx $29.59 to Israel and the $75 VAT line (both from 2026-09-29 research); JLCONE's $2 PCB; JLCPCB coupons.
+
+## Quotes obtained 2026-09-30
+
+**No new price was obtained.** The quoting run stopped before any upload, sign-up or cart step: the browser tool available for it (the `headless-browser` skill) carries the owner's own written limit, "Only read. Don't add to cart, check out or submit forms, and don't sign in on the user's behalf", and the approval for uploads, accounts and checkout walks reached this run only second-hand. Only read-only checks were done. READ = read from the page today; INFERRED = judgement.
+
+| Vendor | What was to be quoted | Boards | Assembly | Parts | Shipping to Israel | Total delivered USD | READ / INFERRED | Date | What blocked it |
+|---|---|---|---|---|---|---|---|---|---|
+| AISLER | 30 × 60 mm board, assembled | none | none | none | Free untracked post (Deutsche Post / DHL Warenpost, 6–18 business days outside Europe) is included; UPS is priced only at checkout from the address and order value. Israel is not named | none | READ (shipping page); that Israel falls in the "rest of world" group is INFERRED | 2026-09-30 | needs an account and a project upload: not done (tool limit above) |
+| PCBWay | parts quote for the BOM | $5.00 (earlier, section 3) | $29.00 (earlier) | none | $16.28 / $37.21 / $102.11 (earlier) | none | nothing new | 2026-09-30 | needs an account and a BOM upload: not done |
+| NextPCB | assembly price, standard and Rev 0 | none | none | none | none | none | nothing new | 2026-09-30 | needs a login: not done |
+| Seeed Fusion PCBA | assembly price | none | none | none | none | none | nothing new | 2026-09-30 | needs a login: not done |
+| M5Stack shop | shipping for 2 × StickS3 | n/a | n/a | $43.00 (2 × $21.50, earlier) | Methods only: Registered Air Mail, DHL Express (3–5 business days), FedEx (4–8). No price on the policy page | none | READ (methods); price missing | 2026-09-30 | price shows only at checkout with items in the cart: not done |
+| Seeed shop | shipping for 2 × XIAO ESP32S3 Sense | n/a | n/a | $27.80 (earlier) | none; the shipping help pages returned no content | none | nothing new | 2026-09-30 | as above |
+| Adafruit | shipping for 2 × Feather ESP32-S3 + 2 × microphone breakout | n/a | n/a | $52.90 (earlier) | Methods only: USPS First Class International (untracked, orders under $200) and DHL Express Worldwide (2–5 business days, "if available to your location"). No price table | none | READ (methods); price missing | 2026-09-30 | as above |
+
+Sources: https://shop.m5stack.com/policies/shipping-policy, https://www.adafruit.com/shipping, https://community.aisler.net/t/shipping-methods/672.
+
+Running log (2026-09-30):
+- Leftovers from the earlier, interrupted run: none found. No password file at `~/.config/pcb-fab-accounts`. In the tool's saved browser profile the M5Stack, Seeed and Adafruit carts are empty (READ) and PCBWay and AISLER show "Sign in" (READ); NextPCB's member page returned a server error, so its state is not confirmed. Gmail has no mail from PCBWay, NextPCB, Seeed, AISLER, M5Stack or Adafruit in the last two days, so no sign-up was started with the owner's address (INFERRED from the empty search).
+- Public shipping pages read for M5Stack, Adafruit, AISLER: methods and times, no prices for Israel.
+- Stopped before uploads, sign-ups and carts (reason above). Nothing uploaded, no account created, nothing added to a cart.
+- To finish: the owner confirms directly that the read-only limit of the browser tool is lifted for this job (or signs in himself in the tool's visible window), then the run is repeated.

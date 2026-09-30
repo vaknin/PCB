@@ -187,7 +187,7 @@ source = "USB 2.0; that every port and charger gives at least this is INFERRED"
 [[power.source.limit]]
 name = "HE9073 LDO output"
 ma = 500
-source = "HE9073 datasheet p.5: 500 mA typical at 0.5 V dropout; limit 550 mA typical, no minimum given (research/2026-09-30-power-path-fix.md)"
+source = "HE9073 datasheet p.5: 500 mA output; limit 550 mA typical, no minimum given. Dropout (typical, from the figure): ~0.45 V at 350 mA, ~0.77 V at 500 mA (research/2026-09-30-datasheet-check-power-path.md)"
 
 [[power.source]]
 name = "battery"
@@ -197,7 +197,7 @@ sleep_ua = 20
 [[power.source.limit]]
 name = "HE9073 LDO output"
 ma = 500
-source = "HE9073 datasheet p.5: 500 mA typical at 0.5 V dropout; limit 550 mA typical, no minimum given (research/2026-09-30-power-path-fix.md)"
+source = "HE9073 datasheet p.5: 500 mA output; limit 550 mA typical, no minimum given. Dropout (typical, from the figure): ~0.45 V at 350 mA, ~0.77 V at 500 mA (research/2026-09-30-datasheet-check-power-path.md)"
 
 [[power.source.limit]]
 name = "cell peak discharge"
@@ -285,55 +285,333 @@ id = "R1"
 text = "Runs from a single-cell LiPo battery and from USB-C, and charges the battery from any USB-C charger or computer port (5 V, no USB-PD)"
 covered_by = ["part:J1", "part:R1", "part:R2", "part:J2", "part:U2", "part:Q1", "part:D2", "part:U4", "pin:CHG_FAST", "power:usb", "power:battery"]
 
+[[requirement.proof]]
+how = "datasheet"
+evidence = "Charger, power path, regulator input range and battery-socket polarity checked against the makers' datasheets by a separate agent (research/2026-09-30-datasheet-check-capture-clip.md, 33 rows; the two parts swapped in later: research/2026-09-30-datasheet-check-power-path.md)"
+
+[[requirement.proof]]
+how = "gate"
+evidence = "Power budget gate: USB 467.9 of 500 mA, battery 363.9 of 400 mA"
+
+[[requirement.proof]]
+how = "simulated"
+evidence = "QEMU scenario low_battery: fast charge only with USB present and the radio off; laptop tests of the pin rules (test_pins_seq, test_clip_power)"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Real charging, and the 3.3 V rail holding through a Wi-Fi burst on a low cell: measured on the first board"
+
 [[requirement]]
 id = "R2"
 text = "Sleeps between uses, so the battery lasts weeks (whole board under 20 µA asleep)"
 covered_by = ["sleep:battery", "part:U4", "pin:MIC_PWR"]
+
+[[requirement.proof]]
+how = "datasheet"
+evidence = "Sum of the datasheet figures asleep: 12.65 of 20 µA (three lines are maximums, the module's 8 µA is a typical figure, two lines are arithmetic)"
+
+[[requirement.proof]]
+how = "simulated"
+evidence = "Laptop tests of the pin sequences: everything switched off and held before sleep (test_pins_seq)"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Real sleep current can't be measured in simulation or on the dev board: measured on the first board with a meter"
 
 [[requirement]]
 id = "R3"
 text = "One button: a press starts or stops a new recording; a hold of about 1 s starts an addition to this device's last note"
 covered_by = ["part:SW1", "pin:BUTTON", "test:button"]
 
+[[requirement.proof]]
+how = "simulated"
+evidence = "QEMU scenarios press and hold (a press makes a note, a 1 s hold adds to the last one); laptop tests of the state machine and the button timing (test_clip_sm, test_clip_button)"
+
+[[requirement.proof]]
+how = "devboard"
+evidence = "Wake from sleep to running code: 40 ms on a real ESP32-S3 (timer wake; firmware/spikes/codec/RESULTS-devboard.md §5)"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Wake by the real button, and how the printed cap feels: first board"
+
 [[requirement]]
 id = "R4"
 text = "Records speech clearly from about arm's length with an on-board digital microphone"
 covered_by = ["part:MK1", "pin:MIC_PWR", "pin:I2S_SCK", "pin:I2S_WS", "pin:I2S_SD", "test:mic"]
+
+[[requirement.proof]]
+how = "datasheet"
+evidence = "Microphone pins, supply and land pattern checked against the ICS-43434 datasheet by a separate agent"
+
+[[requirement.proof]]
+how = "devboard"
+evidence = "The voice encoder keeps up on a real ESP32-S3 (under a third of one core) and a recording made on the chip plays back completely (RESULTS-devboard.md §1, §3)"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "How speech sounds through the hole in the board and the 12 mm channel in the case: only a real board and case can tell"
 
 [[requirement]]
 id = "R5"
 text = "Keeps at least 30 minutes of recordings when there is no Wi-Fi (one recording up to 15 minutes), and sends them once connected"
 covered_by = ["part:U1", "test:wifi"]
 
+[[requirement.proof]]
+how = "simulated"
+evidence = "QEMU scenarios offline (two recordings kept, both sent once the network is back, no duplicates) and power_loss (a recording cut by a power loss is kept up to its last second)"
+
+[[requirement.proof]]
+how = "datasheet"
+evidence = "Room for recordings: 9.75 MB of the module's 16 MB flash (partitions.csv); 30 minutes of speech is about 7.4 MB at the measured 32.7 kbit/s"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Wi-Fi range and reconnecting at home: first board"
+
 [[requirement]]
 id = "R6"
 text = "Sends each recording to Gemini and saves the note to the GitHub notes repo in Capture's note format"
 covered_by = ["part:U1", "test:wifi"]
+
+[[requirement.proof]]
+how = "simulated"
+evidence = "QEMU scenarios press and hold against a stand-in for Gemini and GitHub (note format from Capture's own ported tests; test_clip_upload)"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "The encrypted connection to the real Gemini and GitHub servers was not exercised (no real requests without the owner's OK); a firmware matter, fixable over USB"
 
 [[requirement]]
 id = "R7"
 text = "Shows its state with one colour light, plus a charge light"
 covered_by = ["part:D4", "pin:LED_R", "pin:LED_G", "pin:LED_B", "part:D1", "test:led_rgb"]
 
+[[requirement.proof]]
+how = "simulated"
+evidence = "Laptop tests of the light's pin rules; QEMU scenarios check the light's state per step"
+
+[[requirement.proof]]
+how = "datasheet"
+evidence = "Light pinout and currents checked against the LTST-C19HE1WT datasheet by a separate agent"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Brightness and colour through the case window: looked at on the first board"
+
 [[requirement]]
 id = "R8"
 text = "Knows its battery level and whether USB is plugged in, and warns when the battery is low"
 covered_by = ["pin:BAT_ADC", "pin:VBUS_SENSE", "pin:CHRG", "pin:STDBY", "test:battery", "test:usb_sense"]
+
+[[requirement.proof]]
+how = "simulated"
+evidence = "QEMU scenarios low_battery (records but doesn't upload at 3.6 V, refuses at 3.35 V, recovers on USB) and selftest (a 1.2 V cell fails the battery test); laptop tests test_clip_power, test_clip_status"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Accuracy of the real battery reading (the percent curve is a guess): calibrated on the first board, firmware only"
 
 [[requirement]]
 id = "R9"
 text = "Flashed, set up and debugged over the same USB-C cable, without extra hardware; survives static and surges on the USB port"
 covered_by = ["pin:USB_DM", "pin:USB_DP", "pin:BUTTON", "part:SW2", "part:U3", "part:D3", "test:usb_sense"]
 
+[[requirement.proof]]
+how = "datasheet"
+evidence = "USB-C pins, the two 5.1k resistors and the protection parts checked against datasheets by a separate agent"
+
+[[requirement.proof]]
+how = "devboard"
+evidence = "Flashing and the serial console over the chip's own USB work on a real ESP32-S3 (RESULTS-devboard.md)"
+
+[[requirement.proof]]
+how = "simulated"
+evidence = "Setup over the console (`PROV`) runs in QEMU (the `sim` stage)"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Surviving a real static shock: not tested"
+
 [[requirement]]
 id = "R10"
 text = "Built around a pre-certified ESP32-S3 module (Wi-Fi); no antenna design"
 covered_by = ["part:U1"]
 
+[[requirement.proof]]
+how = "datasheet"
+evidence = "ESP32-S3-WROOM-1 pads checked against Espressif's datasheet (HARDWARE_LESSONS.md); the antenna sticks out past the board edge with no copper under it"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Wi-Fi range inside the case, next to the battery and a hand: first board"
+
 [[requirement]]
 id = "R11"
 text = "Fully assembled by JLCPCB with in-stock parts, passing their design rules"
 covered_by = ["gate:erc", "gate:drc", "gate:netlist", "gate:netclasses", "gate:routing"]
+
+[[requirement.proof]]
+how = "gate"
+evidence = "All gates pass on the committed board: electrical check 0, manufacturing check 0 open (16 waived cosmetic silkscreen warnings), nothing unrouted (kicad/reports/gates.json)"
+
+[[requirement.proof]]
+how = "gate"
+evidence = "Every part in stock at JLCPCB on 2026-09-30 (fab/cost.json); thinnest: the microphone, 1,271"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Part rotations D1-D4, J2, MK1, SW1, SW2, U1 are checked in JLCPCB's placement preview before paying"
+
+# --- Open risks (readiness page). Sources: research/2026-09-30-blind-review-capture-clip.md,
+# research/2026-09-30-red-team-capture-clip.md, research/2026-09-30-datasheet-check-power-path.md, D-025.
+
+[[risk]]
+what = "The battery's 25 mm lead reaches its socket (J2): the path through the edge notch is about 30-35 mm"
+tag = "INFERRED"
+fix = "new_board"
+miss = "The cell can't be plugged in without splicing its wires or finding another cell"
+check = "Found by the blind review; J2 moves next to the cell's lead end in round 2, and the case check gains a lead-length check"
+
+[[risk]]
+what = "The 3.3 V supply holds when Wi-Fi switches on (a 0 to 350 mA step) with only ~32 µF behind the regulator"
+tag = "INFERRED"
+fix = "new_board"
+miss = "The board resets whenever it tries to send on battery; the cure is an added capacitor, soldered by hand or a new board"
+check = "Found by the red team; round 2 adds bulk capacitance at the module (fee-free 22 µF parts) and a pad pair for more"
+
+[[risk]]
+what = "The module's ground reaches the rest of the board through a single via"
+tag = "INFERRED"
+fix = "new_board"
+miss = "Poor Wi-Fi and a noisy microphone, or a dead board if that one via is bad"
+check = "Found by the blind review (it removed the via from the connection graph); round 2 adds stitching vias and a check"
+
+[[risk]]
+what = "The cell's end lies under two of the USB socket's shell legs (the fit check passes, but whether the legs stick out under the board is unverified)"
+tag = "UNVERIFIED"
+fix = "new_board"
+miss = "A leg pressing into a lithium cell is a safety problem; the cure is a moved cell pocket (new case), or a moved socket (new board)"
+check = "Round 2 moves the pocket clear of the legs and checks it in the case stage"
+
+[[risk]]
+what = "The microphone is in stock when the order is placed (1,271 at JLCPCB on 2026-09-30, and the order waits for other designs)"
+tag = "UNVERIFIED"
+fix = "new_board"
+miss = "The fallback microphone has a different footprint and type: a new layout before ordering, not after"
+check = "Stock is re-read by the cost stage before the order; pre-buying the part at JLCPCB is an option for the choice page"
+
+[[risk]]
+what = "Part rotations at assembly for D1-D4, J2, MK1, SW1, SW2 and U1 (no known correction for these footprints)"
+tag = "UNVERIFIED"
+fix = "new_board"
+miss = "A part soldered turned round: dead boards"
+check = "Each is checked in JLCPCB's placement preview before paying; nothing is paid until they look right"
+
+[[risk]]
+what = "The ~12 mm sound path (hole in the board, chimney, case floor) doesn't ring near 6-7 kHz, and stays open when the clip lies on a table or in a pocket"
+tag = "INFERRED"
+fix = "rework"
+miss = "Speech sounds thin or muffled; the cure is a reprinted case (shorter path or a side opening), and a filter in firmware"
+check = "Listened to on the first board; the case can be reprinted without a new board"
+
+[[risk]]
+what = "The button cap's 0.2 mm gap to the lid is enough for a printed part"
+tag = "INFERRED"
+fix = "rework"
+miss = "The cap sticks and holds the button down; a reprinted or sanded cap"
+check = "Found by the red team; round 2 opens the gap to 0.5 mm"
+
+[[risk]]
+what = "The button, 0.55 mm proud of the lid with no guard, isn't pressed by accident in a pocket"
+tag = "INFERRED"
+fix = "rework"
+miss = "Recordings nobody meant to make are sent to Gemini; a reprinted lid with a raised rim, and a firmware limit"
+check = "A rim or recess is on the choice page (case look); firmware gets a shorter limit for a recording with no sound in it"
+
+[[risk]]
+what = "The charger chip stays cool enough to fast-charge at 333 mA without dedicated copper"
+tag = "INFERRED"
+fix = "rework"
+miss = "Slower charging than planned (the chip throttles itself); nothing breaks"
+check = "Charge current measured on the first board"
+
+[[risk]]
+what = "The surge diode D3 protects the regulator although it sits at the far end of the 5 V track"
+tag = "INFERRED"
+fix = "rework"
+miss = "A rare surge from a bad charger could damage the regulator"
+check = "Round 2 routes the 5 V track past D3 first; the new regulator also stands 9 V"
+
+[[risk]]
+what = "The 0.3 mm power tracks from the battery to the module (about 72 mm) don't drop too much"
+tag = "INFERRED"
+fix = "firmware"
+miss = "About 45 mV more drop in a Wi-Fi burst: a slightly higher battery level below which it stops uploading"
+check = "Round 2 widens them where there is room"
+
+[[risk]]
+what = "The colour light is bright enough on a low battery through 1k resistors"
+tag = "INFERRED"
+fix = "rework"
+miss = "A dim light on battery; three resistors changed by hand"
+check = "Looked at on the first board"
+
+[[risk]]
+what = "The boss-in-courtyard margin at the screws is 0.04 mm"
+tag = "INFERRED"
+fix = "rework"
+miss = "A case that needs a touch of filing to seat the board"
+check = "First print"
+
+[[risk]]
+what = "The regulator drops about 0.45 V at the Wi-Fi peak, so uploads need the cell at about 3.55 V under load; its current limit has only a typical figure (550 mA)"
+tag = "INFERRED"
+fix = "firmware"
+miss = "The last 5-10 % of the battery can record but not upload until it is charged"
+check = "Measured on the first board; the limit is a number in firmware"
+
+[[risk]]
+what = "Sleep current is really about 13 µA (the module's 8 µA is a typical figure; the diode's leakage when warm is interpolated)"
+tag = "INFERRED"
+fix = "firmware"
+miss = "Weeks of standby instead of months if badly off; nothing else"
+check = "Measured with a meter on the first board"
+
+[[risk]]
+what = "The firmware behind the real pins, microphone, sleep, Wi-Fi and encrypted connections works (it compiles but only its simulated halves have run)"
+tag = "UNVERIFIED"
+fix = "firmware"
+miss = "Bring-up takes longer; fixable over USB"
+check = "Run on the first board; parts of it can be run earlier on the dev board with the owner's Wi-Fi"
+
+[[risk]]
+what = "Nothing stops a crash loop, a brown-out loop or a stuck button from draining the battery"
+tag = "INFERRED"
+fix = "firmware"
+miss = "A flat battery; recoverable by plugging in USB"
+check = "Found by the red team; loop breakers go into the firmware before the order"
+
+[[risk]]
+what = "Wi-Fi updates are only checked against a checksum from the same place, and the update address isn't part of setup yet"
+tag = "INFERRED"
+fix = "firmware"
+miss = "Updates don't run until set up; an attacker on the home network could serve a bad one"
+check = "Signed updates and the setup key go into the firmware before the order"
+
+[[risk]]
+what = "The GitHub token expires on 2027-09-18"
+tag = "UNVERIFIED"
+fix = "firmware"
+miss = "Notes stop arriving until a new token is loaded over USB"
+check = "The review page warns 60 days ahead"
+
+[[risk]]
+what = "The main button shares the pin that selects flashing mode at power-up"
+tag = "INFERRED"
+fix = "firmware"
+miss = "If the battery sags while the button is held, the clip waits in flashing mode until the button is released and it is reset"
+check = "Accepted in the spec (the button doubles as the flashing button); the reset pinhole recovers it"
 
 [firmware]
 # The spec's "What done means": the microphone hears sound, each colour works, the button is
