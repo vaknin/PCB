@@ -17,23 +17,29 @@
 
 char *clip_status_render(const clip_status_t *status)
 {
-    char version[32] = "", time[CAP_ISO_LEN];
+    char version[32] = "", error[CLIP_STATUS_ERROR_LEN] = "", time[CAP_ISO_LEN];
     size_t at = 0;
     for (const char *p = status->firmware ? status->firmware : ""; *p && at < sizeof version - 1; p++) {
         if ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || strchr("._+-", *p)) {
             version[at++] = *p;
         }
     }
+    // plain ASCII without quotes or backslashes, so it needs no escaping
+    at = 0;
+    for (const char *p = status->error ? status->error : ""; *p && at < sizeof error - 1; p++) {
+        unsigned char c = (unsigned char)*p;
+        error[at++] = c < 0x20 || c > 0x7e || c == '"' || c == '\\' ? ' ' : (char)c;
+    }
     cap_iso_format(status->time_s, time);
-    const size_t size = 320;
+    const size_t size = 360 + sizeof error;
     char *out = malloc(size);
     if (out) {
         snprintf(out, size,
                  "{\n  \"device\": \"" CAP_SOURCE "\",\n  \"time\": \"%s\",\n  \"battery_percent\": %d,\n"
                  "  \"battery_mv\": %d,\n  \"usb\": %s,\n  \"charging\": %s,\n  \"queued\": %d,\n"
-                 "  \"firmware\": \"%s\"\n}\n",
+                 "  \"firmware\": \"%s\",\n  \"last_error\": \"%s\"\n}\n",
                  time, clip_battery_percent(status->cell_mv), status->cell_mv, status->usb ? "true" : "false",
-                 status->charging ? "true" : "false", status->queued, version);
+                 status->charging ? "true" : "false", status->queued, version, error);
     }
     return out;
 }
@@ -344,11 +350,15 @@ clip_upload_t clip_upload_next(const clip_uploader_t *up, clip_queue_status_t *a
         *after = status;
         out = UP_STORAGE;
     }
-    if (out == CLIP_UP_SAVED && up->status) {
+    if ((out == CLIP_UP_SAVED || out == CLIP_UP_GAVE_UP) && up->status) {
         clip_status_t report = {0};
-        if (up->status(up->status_ctx, &report)) {
+        if (up->status(up->status_ctx, out, &report)) {
             report.queued = after->queued;
-            clip_status_report(up->github, &report); // the note is saved whatever this says
+            // the note is saved whatever this says
+            bool ok = clip_status_report(up->github, &report).status == CAP_OK;
+            if (up->status_done) {
+                up->status_done(up->status_ctx, &report, ok);
+            }
         }
     }
     if (out == UP_STORAGE) {

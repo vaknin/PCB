@@ -672,11 +672,13 @@ static void a_dead_file_system_is_not_retried_at_once(void)
 
 // ---- the status file -----------------------------------------------------------------------------
 
-static bool status_now(void *ctx, clip_status_t *status)
+static bool status_now(void *ctx, clip_upload_t result, clip_status_t *status)
 {
     (void)ctx;
+    (void)result;
     *status = (clip_status_t){
-        .cell_mv = 3800, .usb = false, .charging = false, .firmware = "0.3.1+g12ab\"}", .time_s = clk.wall_ms / 1000};
+        .cell_mv = 3800, .usb = false, .charging = false, .firmware = "0.3.1+g12ab\"}", .time_s = clk.wall_ms / 1000,
+        .error = "Gemini said \"no\"\ntwice"};
     return true;
 }
 
@@ -694,7 +696,7 @@ static void the_status_file_is_written_after_a_saved_note(void)
     CHECK_STR(gh_find(&gh, CLIP_STATUS_PATH)->text,
               "{\n  \"device\": \"clip\",\n  \"time\": \"2026-09-19T07:42:13Z\",\n  \"battery_percent\": 45,\n"
               "  \"battery_mv\": 3800,\n  \"usb\": false,\n  \"charging\": false,\n  \"queued\": 1,\n"
-              "  \"firmware\": \"0.3.1+g12ab\"\n}\n");
+              "  \"firmware\": \"0.3.1+g12ab\",\n  \"last_error\": \"Gemini said  no  twice\"\n}\n");
     cap_json_t root;
     CHECK(cap_json_parse(gh_find(&gh, CLIP_STATUS_PATH)->text, &root));
 
@@ -738,7 +740,7 @@ static void a_status_file_that_cannot_be_written_changes_nothing(void)
     // and reported on its own, the failure is told
     world();
     clip_status_t status;
-    status_now(NULL, &status);
+    status_now(NULL, CLIP_UP_SAVED, &status);
     gh.fail_at = 0;
     CHECK_INT(clip_status_report(&github, &status).status, CAP_RETRYABLE);
     gh.status_at = 1;
@@ -747,6 +749,79 @@ static void a_status_file_that_cannot_be_written_changes_nothing(void)
     CHECK_INT(clip_status_report(&github, &status).status, CAP_OK);
     CHECK_INT(clip_status_report(&github, &status).status, CAP_OK);
     CHECK_INT(gh_count(&gh, "devices/"), 1);
+}
+
+// The app decides whether a report is news (clip_status_due) and hears how it went, so it
+// marks only a report that arrived.
+static int status_asked, status_told, status_told_ok;
+static clip_upload_t status_result;
+static bool status_wanted;
+
+static bool status_when_wanted(void *ctx, clip_upload_t result, clip_status_t *status)
+{
+    status_asked++;
+    status_result = result;
+    status_now(ctx, result, status);
+    return status_wanted;
+}
+
+static void status_told_how(void *ctx, const clip_status_t *status, bool ok)
+{
+    (void)ctx;
+    status_told++;
+    status_told_ok += ok;
+    CHECK_INT(status->cell_mv, 3800);
+}
+
+static void the_app_chooses_when_to_report_and_hears_how_it_went(void)
+{
+    world();
+    up.status = status_when_wanted;
+    up.status_done = status_told_how;
+    status_asked = status_told = status_told_ok = 0;
+    // not wanted: asked, nothing written
+    status_wanted = false;
+    record(1, false, 3);
+    clip_queue_status_t after;
+    CHECK_INT(clip_upload_next(&up, &after), CLIP_UP_SAVED);
+    CHECK_INT(status_asked, 1);
+    CHECK_INT(status_result, CLIP_UP_SAVED);
+    CHECK_INT(status_told, 0);
+    CHECK(gh_find(&gh, CLIP_STATUS_PATH) == NULL);
+    // wanted and written
+    status_wanted = true;
+    record(2, false, 3);
+    later(10000);
+    CHECK_INT(clip_upload_next(&up, &after), CLIP_UP_SAVED);
+    CHECK_INT(status_told, 1);
+    CHECK_INT(status_told_ok, 1);
+    CHECK(gh_find(&gh, CLIP_STATUS_PATH) != NULL);
+    // wanted and GitHub refuses it: told so, and the note is saved all the same
+    record(3, false, 3);
+    later(10000);
+    gh.status_at = gh.requests + 3; // after the counter's GET and PUT and the note's PUT
+    gh.status = 500;
+    CHECK_INT(clip_upload_next(&up, &after), CLIP_UP_SAVED);
+    CHECK_INT(status_told, 2);
+    CHECK_INT(status_told_ok, 1);
+    CHECK_INT(gh_count(&gh, "notes/"), 3);
+    // a recording Gemini will not take is news too: the report goes out with no note saved
+    gh.status_at = -1;
+    record(4, false, 3);
+    later(10000);
+    gemini_answers(&gm, 400, strdup("{\"error\":{\"message\":\"bad audio\"}}"));
+    CHECK_INT(clip_upload_next(&up, &after), CLIP_UP_GAVE_UP);
+    CHECK_INT(status_result, CLIP_UP_GAVE_UP);
+    CHECK_INT(status_told, 3);
+    CHECK_INT(status_told_ok, 2);
+    CHECK_INT(gh_count(&gh, "notes/"), 3);
+    // and nothing is asked after a try that only waits
+    record(5, false, 3);
+    later(10000);
+    gemini_answers(&gm, 503, strdup("{}"));
+    int asked = status_asked;
+    CHECK_INT(clip_upload_next(&up, &after), CLIP_UP_LATER);
+    CHECK_INT(status_asked, asked);
 }
 
 // ---- cut at every step ---------------------------------------------------------------------------
@@ -918,6 +993,7 @@ int main(void)
     RUN(a_dead_file_system_is_not_retried_at_once);
     RUN(the_status_file_is_written_after_a_saved_note);
     RUN(a_status_file_that_cannot_be_written_changes_nothing);
+    RUN(the_app_chooses_when_to_report_and_hears_how_it_went);
     RUN(power_lost_at_every_file_operation);
     RUN(flash_dead_at_every_file_operation);
     RUN(network_lost_at_every_request);

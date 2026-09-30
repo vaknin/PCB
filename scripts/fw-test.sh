@@ -3,6 +3,9 @@
 #
 #   scripts/fw-test.sh            gcc unit tests, then the ESP-IDF linux-target app
 #   scripts/fw-test.sh --gcc      only the gcc unit tests (no ESP-IDF needed)
+#   scripts/fw-test.sh --scenarios   also layer 2's scripted scenarios: every
+#                                 boards/*/firmware/sim/run.py (whole image in QEMU against a
+#                                 local mock server; a few minutes). With --gcc: gcc and these.
 #
 # gcc tests: every firmware/test/test_*.c and boards/*/firmware/test/test_*.c is one program.
 # Its first line names the sources it tests:  // SOURCES: firmware/components/x/x.c ...
@@ -18,7 +21,14 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 out="$root/firmware/test/build"
 mkdir -p "$out"
 only_gcc=false
-[[ "${1:-}" == "--gcc" ]] && only_gcc=true
+scenarios=false
+for arg in "$@"; do
+    case "$arg" in
+        --gcc) only_gcc=true ;;
+        --scenarios) scenarios=true ;;
+        *) echo "unknown option $arg (see the top of $0)"; exit 2 ;;
+    esac
+done
 
 includes=(-I"$root/firmware/test/stubs" -I"$root/firmware/test")
 for c in "$root"/firmware/components/*/; do
@@ -87,6 +97,24 @@ if ! $only_gcc; then
         (cd "$app/build" && timeout 120 "$elf") >"$out/linux.log" 2>&1 || code=$?
         check "linux: $(basename "$elf" .elf)" "$code" "$out/linux.log"
     fi
+fi
+
+if $scenarios; then
+    echo "== FW-TEST (QEMU scenarios)"
+    for run in "$root"/boards/*/firmware/sim/run.py; do
+        board=$(basename "$(dirname "$(dirname "$(dirname "$run")")")")
+        log="$out/scenarios-$board.log"
+        code=0
+        "$run" >"$log" 2>&1 || code=$?
+        grep -E '^   [a-z_]+ +(pass|FAIL) ' "$log" | cut -c1-160 | sed "s/^   /   $board: /"
+        passed=$(grep -cE '^   [a-z_]+ +pass ' "$log" || true)
+        if [[ $code -eq 0 ]]; then
+            total_pass=$((total_pass + passed))
+        else
+            grep -E '^== ' "$log" | tail -1 | sed 's/^/      /'
+            failed+=("$board scenarios")
+        fi
+    done
 fi
 
 if ((${#failed[@]})); then

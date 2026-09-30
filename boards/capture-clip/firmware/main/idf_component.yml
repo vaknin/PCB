@@ -1,0 +1,7 @@
+# Versions looked up on components.espressif.com on 2026-09-30: each is the latest stable.
+# esp_audio_codec and esp_muxer are the ones Phase D.1 proved on IDF v6.1 (HARDWARE_LESSONS).
+dependencies:
+  idf: ">=6.1"
+  espressif/esp_audio_codec: "==2.6.2"
+  espressif/esp_muxer: "==1.2.3"
+  joltwallet/littlefs: "==1.22.3"

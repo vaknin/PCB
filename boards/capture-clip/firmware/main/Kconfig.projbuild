@@ -1,0 +1,11 @@
+menu "capture-clip simulation"
+
+config CLIP_SIM_FAIL_TRIAL
+    bool "A firmware that fails its own check after an update (QEMU rollback scenario)"
+    depends on BOARD_TARGET_QEMU
+    default n
+    help
+        Only for the "bad update is rolled back" scenario (sim/run.py): this build, installed
+        as an update, fails update_trial() and must be rolled back. Never in a real build.
+
+endmenu

@@ -43,6 +43,11 @@ static void print_line(const char *reply, void *ctx)
 
 void provision_serve(uint32_t ms)
 {
+    provision_serve_with(ms, NULL, NULL);
+}
+
+void provision_serve_with(uint32_t ms, provision_other_fn other, void *ctx)
+{
     static char line[PROV_MAX_LINE + 2];
     size_t n = 0;
     bool overflow = false;
@@ -59,6 +64,12 @@ void provision_serve(uint32_t ms)
             line[n] = 0;
             if (!overflow) {
                 provision_handle(line, print_line, NULL);
+                if (other && strncmp(line, "PROV", 4) != 0 && line[0] != 0) {
+                    if (n > 0 && line[n - 1] == '\r') {
+                        line[n - 1] = 0;
+                    }
+                    other(line, ctx);
+                }
             } else if (strncmp(line, "PROV", 4) == 0) {
                 printf("PROV ERR line\n"); // too long: never store a cut-off value
             }

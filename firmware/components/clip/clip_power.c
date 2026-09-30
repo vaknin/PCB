@@ -24,12 +24,22 @@ clip_battery_t clip_battery_level(clip_battery_t before, int cell_mv)
     return CLIP_BATTERY_OK;
 }
 
+int clip_battery_loaded_mv(int loaded_mv)
+{
+    if (loaded_mv >= CLIP_UPLOAD_LOADED_MIN_MV) {
+        // under load it reads below the at-rest limit and is still fine
+        return loaded_mv > CLIP_UPLOAD_MIN_MV ? loaded_mv : CLIP_UPLOAD_MIN_MV;
+    }
+    // low, never empty: what the cell does under Wi-Fi says nothing about recording
+    return CLIP_UPLOAD_MIN_MV - 1;
+}
+
 int clip_battery_percent(int cell_mv)
 {
     // INFERRED: a generic single-cell LiPo discharge curve at a light load, not this cell's
     static const struct {
         int mv, percent;
-    } curve[] = {{3300, 0}, {3500, 5}, {3600, 10}, {3700, 25}, {3800, 45}, {3900, 62}, {4000, 78}, {4100, 90}, {4200, 100}};
+    } curve[] = {{CLIP_RECORD_MIN_MV, 0}, {3500, 5}, {3600, 10}, {3700, 25}, {3800, 45}, {3900, 62}, {4000, 78}, {4100, 90}, {4200, 100}};
     const int last = (int)(sizeof curve / sizeof *curve) - 1;
     if (cell_mv <= curve[0].mv) {
         return 0;

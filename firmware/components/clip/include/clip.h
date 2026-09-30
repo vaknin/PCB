@@ -20,9 +20,21 @@ typedef enum {
 
 // ---- battery (research/2026-09-29-esp32-firmware.md §7) -------------------------------------------
 
-#define CLIP_BATTERY_DIVIDER 3       // 2 x 1 MΩ over 1 MΩ
-#define CLIP_UPLOAD_MIN_MV 3450      // below: no Wi-Fi (the LDO drops out under its peaks)
-#define CLIP_RECORD_MIN_MV 3300      // below: no recording
+#define CLIP_BATTERY_DIVIDER 3 // 2 x 1 MΩ over 1 MΩ
+
+// The limits follow from the HE9073 regulator (research/2026-09-30-power-path-fix.md, "Dropout:
+// the price on battery"): it drops about 0.46 V at the module's 355 mA Wi-Fi peak (datasheet
+// Fig. 5, typical, no maximum given) and Q1 0.03 V, and the module needs 3.0 V. INFERRED until
+// measured at bring-up: a change here is a firmware update, not a board change.
+//
+// Wi-Fi needs 3.55 V at the cell while it transmits. The cell sags under that load, so the limit
+// for a reading at rest is higher: 0.1 V for 355 mA through a small cell and its protection
+// circuit (about 0.3 Ω, INFERRED; the cell's datasheet was not read).
+#define CLIP_UPLOAD_LOADED_MIN_MV 3550 // read with Wi-Fi up: below, Wi-Fi goes off again
+#define CLIP_UPLOAD_SAG_MV 100
+#define CLIP_UPLOAD_MIN_MV (CLIP_UPLOAD_LOADED_MIN_MV + CLIP_UPLOAD_SAG_MV) // at rest: below, no Wi-Fi
+// Recording draws under 100 mA (about 0.1 V of dropout): the same research file puts its limit at 3.4 V.
+#define CLIP_RECORD_MIN_MV 3400       // at rest: below, no recording
 #define CLIP_BATTERY_HYSTERESIS_MV 50 // a level is left upwards only this far above its limit
 
 typedef enum {
@@ -39,8 +51,13 @@ int clip_battery_cell_mv(int adc_mv);
 clip_battery_t clip_battery_level(clip_battery_t before, int cell_mv);
 
 // How full the cell is, 0-100, from its voltage at rest: a typical LiPo curve between 4.2 V and
-// the 3.3 V where the clip stops recording. A rough figure for the status file, not a gauge.
+// the voltage where the clip stops recording. A rough figure for the status file, not a gauge.
 int clip_battery_percent(int cell_mv);
+
+// A reading taken while Wi-Fi is up, as the level event to give the state machine: the reading
+// itself when the cell holds up, and one just under the upload limit when it sags too far, so
+// the state machine turns Wi-Fi off and keeps the queue (it records on).
+int clip_battery_loaded_mv(int loaded_mv);
 
 // ---- the light (spec.md, Inputs and outputs) ------------------------------------------------------
 
@@ -322,8 +339,10 @@ void clip_queue_drop(const clip_store_t *store, const char *id);
 // ---- the status file ------------------------------------------------------------------------------
 
 #define CLIP_STATUS_PATH "devices/clip.json"
+#define CLIP_STATUS_ERROR_LEN 96
 
 // What the owner can see of the clip from the phone or laptop: a small file in the notes repo.
+// The phone and the laptop only read `notes/` and `next-number`, so they ignore it.
 typedef struct {
     int cell_mv;          // read at rest, before Wi-Fi came up
     bool usb;
@@ -331,13 +350,67 @@ typedef struct {
     const char *firmware; // a version: letters, digits and . _ + - only (anything else is left out)
     int64_t time_s;
     int queued;           // recordings still waiting
+    const char *error;    // the last thing that went wrong, NULL or "" for nothing
 } clip_status_t;
 
 char *clip_status_render(const clip_status_t *status); // malloc'd JSON, one key per line
 
-// Reads the file's sha, then writes it (or creates it). One try: the next saved note writes a
+// Reads the file's sha, then writes it (or creates it). One try: a later report writes a
 // newer one anyway.
 cap_result_t clip_status_report(const cap_github_t *github, const clip_status_t *status);
+
+// Every report is a commit in the notes repo, which costs the laptop a full sync and can make
+// a note's write there collide once. So the file is written only when something in it is news.
+#define CLIP_STATUS_PERCENT_STEP 20             // the battery moved this far since the last report
+#define CLIP_STATUS_MAX_AGE_S (24 * 60 * 60)    // or the last report is a day old
+
+// What the last report that reached GitHub said: kept on flash as the file "status".
+typedef struct {
+    int percent;
+    clip_battery_t level;
+    int64_t time_s;
+    char firmware[32];
+    char error[CLIP_STATUS_ERROR_LEN];
+} clip_status_mark_t;
+
+// The mark a report of `status` leaves.
+void clip_status_mark(const clip_status_t *status, clip_status_mark_t *mark);
+// True when `status` should be reported: there was no report yet (last NULL), the firmware
+// or the last error changed, the battery went below (or back above) the upload limit or moved
+// CLIP_STATUS_PERCENT_STEP, or the last report is older than CLIP_STATUS_MAX_AGE_S (also when
+// the clock went backwards).
+bool clip_status_due(const clip_status_mark_t *last, const clip_status_t *status);
+bool clip_status_mark_load(const clip_store_t *store, clip_status_mark_t *mark);
+bool clip_status_mark_save(const clip_store_t *store, const clip_status_mark_t *mark);
+
+// ---- firmware updates over Wi-Fi ------------------------------------------------------------------
+
+// The update manifest: a small text file of `key=value` lines at the provisioned `update_url`:
+//   version=<the firmware's version>   (letters, digits and . _ + - only)
+//   url=<where the image is>           (http:// or https://)
+//   size=<bytes>
+//   sha256=<64 hex digits of the image's SHA-256>
+// Lines starting with # and unknown keys are skipped.
+typedef struct {
+    char version[32];
+    char url[256];
+    long size;
+    uint8_t sha256[32];
+} clip_manifest_t;
+
+bool clip_manifest_parse(const char *text, clip_manifest_t *manifest);
+
+typedef enum {
+    CLIP_UPDATE_NONE,      // the manifest names what is running
+    CLIP_UPDATE_INSTALL,
+    CLIP_UPDATE_TOO_BIG,   // it does not fit the slot
+    CLIP_UPDATE_KNOWN_BAD, // this version was installed before and rolled back: not again
+} clip_update_t;
+
+// running: this firmware's version. rolled_back: the version of the image the bootloader last
+// gave up on (NULL or "" when there is none). slot_bytes: the size of the slot it would go into.
+clip_update_t clip_update_decide(const clip_manifest_t *manifest, const char *running, const char *rolled_back,
+                                 long slot_bytes);
 
 // ---- the upload -----------------------------------------------------------------------------------
 
@@ -363,8 +436,11 @@ typedef struct {
     const char *prompt_append; // system_prompt_append.txt
     const char *schema;        // response_schema.json
     cap_gate_t *gate;          // kept in RTC memory
-    // NULL, or what to report in the status file after a note is saved (queued is filled in here).
-    bool (*status)(void *ctx, clip_status_t *status);
+    // NULL, or what to report in the status file after a try that saved a note or gave one up
+    // (queued is filled in here). False: nothing to report now (clip_status_due).
+    bool (*status)(void *ctx, clip_upload_t result, clip_status_t *status);
+    // NULL, or told how the report went, so the app can keep the mark of one that arrived.
+    void (*status_done)(void *ctx, const clip_status_t *status, bool ok);
     void *status_ctx;
     void (*clock)(void *ctx, clip_clock_t *now); // the wall clock must be set: Wi-Fi is up
     void *clock_ctx;
@@ -377,5 +453,6 @@ typedef struct {
 //   an addition: add the answer to the note and replace it, merging when it changed meanwhile
 //   done: .meta, .ans and the audio removed
 // *after is the queue afterwards, for CLIP_EV_UPLOADED. With nothing due it is CLIP_UP_LATER.
-// After a saved note the status file is written; whether that works changes nothing here.
+// After a saved note, or one given up, the status file is written when the app has something to
+// report; whether that works changes nothing here.
 clip_upload_t clip_upload_next(const clip_uploader_t *up, clip_queue_status_t *after);

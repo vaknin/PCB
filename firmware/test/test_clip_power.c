@@ -13,38 +13,65 @@ static void divider_gives_the_cell_voltage(void)
     CHECK(4350 / CLIP_BATTERY_DIVIDER <= 1600);
 }
 
+// research/2026-09-30-power-path-fix.md, "Dropout": the HE9073 drops ~0.46 V at the Wi-Fi peak.
+static void the_limits_are_the_regulators(void)
+{
+    CHECK_INT(CLIP_UPLOAD_LOADED_MIN_MV, 3550);
+    CHECK_INT(CLIP_UPLOAD_MIN_MV, 3650);
+    CHECK_INT(CLIP_RECORD_MIN_MV, 3400);
+    // 3.0 V at the module: the cell less Q1's 0.03 V and the regulator's 0.46 V
+    CHECK(CLIP_UPLOAD_LOADED_MIN_MV - 30 - 460 >= 3000);
+    // the two levels and their hysteresis do not overlap
+    CHECK(CLIP_RECORD_MIN_MV + CLIP_BATTERY_HYSTERESIS_MV < CLIP_UPLOAD_MIN_MV);
+}
+
 static void levels_going_down(void)
 {
     CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 4200), CLIP_BATTERY_OK);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3450), CLIP_BATTERY_OK);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3449), CLIP_BATTERY_LOW);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3300), CLIP_BATTERY_LOW);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3299), CLIP_BATTERY_EMPTY);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3300), CLIP_BATTERY_LOW);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3299), CLIP_BATTERY_EMPTY);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3650), CLIP_BATTERY_OK);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3649), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3400), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 3399), CLIP_BATTERY_EMPTY);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3400), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3399), CLIP_BATTERY_EMPTY);
     CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, 0), CLIP_BATTERY_EMPTY);
 }
 
 static void levels_come_back_only_above_the_hysteresis(void)
 {
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3300), CLIP_BATTERY_EMPTY);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3349), CLIP_BATTERY_EMPTY);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3350), CLIP_BATTERY_LOW);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3450), CLIP_BATTERY_LOW);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3499), CLIP_BATTERY_LOW);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3500), CLIP_BATTERY_OK);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3499), CLIP_BATTERY_LOW);
-    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3500), CLIP_BATTERY_OK);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3400), CLIP_BATTERY_EMPTY);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3449), CLIP_BATTERY_EMPTY);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3450), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3650), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3699), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3700), CLIP_BATTERY_OK);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3699), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_EMPTY, 3700), CLIP_BATTERY_OK);
     // a reading that wobbles around a limit changes the level once
     clip_battery_t level = CLIP_BATTERY_OK;
     int changes = 0;
     for (int i = 0; i < 20; i++) {
-        clip_battery_t next = clip_battery_level(level, i % 2 ? 3470 : 3430);
+        clip_battery_t next = clip_battery_level(level, i % 2 ? 3670 : 3630);
         changes += next != level;
         level = next;
     }
     CHECK_INT(changes, 1);
     CHECK_INT(level, CLIP_BATTERY_LOW);
+}
+
+// A reading with Wi-Fi up: fine down to 3.55 V, and below that low, never empty.
+static void a_reading_under_load(void)
+{
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, clip_battery_loaded_mv(4100)), CLIP_BATTERY_OK);
+    CHECK_INT(clip_battery_loaded_mv(4100), 4100);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, clip_battery_loaded_mv(3600)), CLIP_BATTERY_OK);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, clip_battery_loaded_mv(3550)), CLIP_BATTERY_OK);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, clip_battery_loaded_mv(3549)), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, clip_battery_loaded_mv(3000)), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_OK, clip_battery_loaded_mv(0)), CLIP_BATTERY_LOW);
+    // once it sagged, only a reading at rest well above the limit brings uploads back
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3690), CLIP_BATTERY_LOW);
+    CHECK_INT(clip_battery_level(CLIP_BATTERY_LOW, 3700), CLIP_BATTERY_OK);
 }
 
 static void percent_follows_the_curve(void)
@@ -54,9 +81,9 @@ static void percent_follows_the_curve(void)
     CHECK_INT(clip_battery_percent(4100), 90);
     CHECK_INT(clip_battery_percent(3800), 45);
     CHECK_INT(clip_battery_percent(3750), 35);
-    CHECK_INT(clip_battery_percent(3450), 4);
-    CHECK_INT(clip_battery_percent(3301), 0);
-    CHECK_INT(clip_battery_percent(3300), 0);
+    CHECK_INT(clip_battery_percent(3450), 3);
+    CHECK_INT(clip_battery_percent(3401), 0);
+    CHECK_INT(clip_battery_percent(CLIP_RECORD_MIN_MV), 0);
     CHECK_INT(clip_battery_percent(0), 0);
     CHECK_INT(clip_battery_percent(-5), 0);
     // never goes down as the voltage goes up, and stays within 0-100
@@ -165,8 +192,10 @@ static void every_pattern_is_in_the_table(void)
 int main(void)
 {
     RUN(divider_gives_the_cell_voltage);
+    RUN(the_limits_are_the_regulators);
     RUN(levels_going_down);
     RUN(levels_come_back_only_above_the_hysteresis);
+    RUN(a_reading_under_load);
     RUN(percent_follows_the_curve);
     RUN(steady_colours_follow_the_spec);
     RUN(a_hold_winks_once);

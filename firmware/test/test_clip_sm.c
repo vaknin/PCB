@@ -625,7 +625,7 @@ static void usb_overrides_the_battery_reading(void)
 static void a_low_battery_records_but_does_not_upload(void)
 {
     start(false);
-    battery(3449);
+    battery(CLIP_UPLOAD_MIN_MV - 1);
     CHECK_INT(sm.battery, CLIP_BATTERY_LOW);
     CHECK_INT(record_and_stop(), CLIP_DO_RECORD_STOP);
     CHECK_INT(sm.state, CLIP_SHOWING);
@@ -638,16 +638,16 @@ static void a_low_battery_records_but_does_not_upload(void)
     CHECK_INT(out.wake_after_ms, 0);
     CHECK_INT(sm.queued, 1);
     // a reading just over the limit does not bring Wi-Fi back; one past the hysteresis does
-    wake(MINUTE, 3460, 1, 0);
+    wake(MINUTE, CLIP_UPLOAD_MIN_MV + 10, 1, 0);
     CHECK_INT(tick(0), CLIP_DO_SLEEP);
-    wake(MINUTE, 3500, 1, 0);
+    wake(MINUTE, CLIP_UPLOAD_MIN_MV + CLIP_BATTERY_HYSTERESIS_MV, 1, 0);
     CHECK_INT(tick(0), CLIP_DO_WIFI_ON);
 }
 
 static void an_empty_battery_does_not_record(void)
 {
     start(false);
-    battery(3299);
+    battery(CLIP_RECORD_MIN_MV - 1);
     CHECK_INT(sm.battery, CLIP_BATTERY_EMPTY);
     CHECK_INT(down(), 0);
     CHECK_INT(sm.state, CLIP_SHOWING);

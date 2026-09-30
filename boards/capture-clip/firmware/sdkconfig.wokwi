@@ -1,0 +1,3 @@
+# Wokwi (D-025): only for pin checks; keep runs short, the free plan is 50 simulated
+# minutes a month. Its serial monitor reads the USB Serial/JTAG console.
+CONFIG_BOARD_TARGET_WOKWI=y

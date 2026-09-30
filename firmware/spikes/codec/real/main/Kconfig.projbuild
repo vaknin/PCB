@@ -1,0 +1,5 @@
+menu "Codec spike (real hardware)"
+    config SPIKE_EMBED_SPEECH
+        bool "Embed ../out/speech.wav (the owner's voice; never leave it on a board)"
+        default n
+endmenu

@@ -1,0 +1,4 @@
+plain rc=0
+memtest rc=0
+skipvalidate rc=0
+quiet-skipvalidate rc=0

@@ -25,6 +25,11 @@ void provision_handle(const char *line, provision_emit_fn emit, void *ctx);
 // Reads and answers commands for up to `ms` milliseconds after the last one (0: forever).
 void provision_serve(uint32_t ms);
 
+// The same, for an app with console commands of its own: every other line (not empty, not
+// starting with PROV, within the line limit) is handed to `other`.
+typedef void (*provision_other_fn)(const char *line, void *ctx);
+void provision_serve_with(uint32_t ms, provision_other_fn other, void *ctx);
+
 // Copies a stored value into buf, NUL-terminated. ESP_ERR_NVS_NOT_FOUND if unset,
 // ESP_ERR_NVS_INVALID_LENGTH if it doesn't fit in len - 1 bytes.
 esp_err_t provision_get(const char *key, char *buf, size_t len);

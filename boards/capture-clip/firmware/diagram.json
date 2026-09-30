@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "author": "pcbgen, from board.toml (do not edit; the fw stage rewrites it)",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {
+        "flashSize": "16",
+        "psramSize": "8",
+        "psramType": "octal",
+        "serialInterface": "USB_SERIAL_JTAG",
+        "cpuFrequency": "240"
+      }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "button",
+      "top": 0,
+      "left": 260,
+      "attrs": {
+        "label": "BUTTON",
+        "bounce": "0"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "button_pullup",
+      "top": 80,
+      "left": 260,
+      "attrs": {
+        "value": "10000"
+      }
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "bat_adc",
+      "top": 160,
+      "left": 260,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-rgb-led",
+      "id": "rgb",
+      "top": 240,
+      "left": 260,
+      "attrs": {
+        "common": "anode"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "esp:0",
+      "button:1.l",
+      "green",
+      []
+    ],
+    [
+      "button:2.l",
+      "esp:GND.1",
+      "green",
+      []
+    ],
+    [
+      "esp:0",
+      "button_pullup:1",
+      "green",
+      []
+    ],
+    [
+      "button_pullup:2",
+      "esp:3V3.1",
+      "green",
+      []
+    ],
+    [
+      "bat_adc:VCC",
+      "esp:3V3.1",
+      "green",
+      []
+    ],
+    [
+      "bat_adc:GND",
+      "esp:GND.1",
+      "green",
+      []
+    ],
+    [
+      "bat_adc:SIG",
+      "esp:1",
+      "green",
+      []
+    ],
+    [
+      "rgb:COM",
+      "esp:3V3.1",
+      "green",
+      []
+    ],
+    [
+      "esp:8",
+      "rgb:R",
+      "green",
+      []
+    ],
+    [
+      "esp:9",
+      "rgb:G",
+      "green",
+      []
+    ],
+    [
+      "esp:10",
+      "rgb:B",
+      "green",
+      []
+    ]
+  ],
+  "dependencies": {}
+}
