@@ -71,6 +71,28 @@ Research behind these: `research/2026-09-29-landscape.md`.
     - the last page has no end-of-stream flag, and its granule is one packet short, which gives an ffmpeg dts warning
     - Our own Ogg writer stays the fallback if a consumer ever rejects them.
   - **Resources:** the encoder allocates about 24 KB, and IDF puts it in PSRAM (76 B internal). The encode task used 23 KB of stack (48 KB given; 32 KB is enough for the app). QEMU timing (real-time factor 0.04) says nothing about real silicon; Phase D.5 measures it.
+- **Phase D.2 (Capture client logic), done 2026-09-30 (Claude's choices): the clip's side of Capture is pure C in `firmware/components/capture`, with 118 laptop tests.**
+  - **Shape:** a shared component with no ESP-IDF calls (`cap_text.c`, `cap_time.c`, `cap_note.c`, `cap_gemini.c`, `cap_github.c`; contract in `include/capture.h`), so `scripts/fw-test.sh` covers all of it with ASan and UBSan. HTTP goes through a function the app supplies (`cap_http_fn`); the gate and retry state are plain data so they survive deep sleep.
+  - **Own JSON reader and calendar maths:** IDF v6.1 ships no `json` component (HARDWARE_LESSONS), and the reader is small: strict RFC 8259, depth limit 32, duplicate keys last wins (as kotlinx), a lone surrogate or `\u0000` becomes U+FFFD. Only JSON strings count for title/summary/transcript/status, and only integers for token counts.
+  - **Note file:** rendering is byte-exact with `NoteFile.kt`; parsing is tolerant (hand edits, CRLF, BOM). Kotlin's `trim` is Unicode whitespace while Java's regex `\s` is ASCII; the C keeps both.
+  - **Gemini request** is built as prefix + base64 audio + suffix, so the app can stream the recording from flash in blocks with a fixed Content-Length. The schema is re-serialised without whitespace, as kotlinx prints it.
+  - **Differences from the phone, all deliberate:**
+    - `source: clip`, and commit messages `clip: add <title>` / `clip: add to <title>` / `clip: next number N` (the one-line title as the file has it).
+    - Reads are `GET contents/notes/<id>.md?ref=<branch>`; the clip reads no tree.
+    - A 404 on the counter GET means "no counter yet"; a missing repo then shows as the PUT's 404 (terminal).
+    - Create: 409/422 → GET the note; there = done (an earlier try whose answer was lost), absent = retry later. The content is not compared.
+    - Update: PUT 404 → `CAP_GONE`; 409/422 → GET, merge like the laptop's `merge_note` (union by id, oldest first then id; title and summary made here win), up to 3 tries.
+    - An addition with an id the note already has is a no-op (a repeated try).
+    - "Typed note" is INFERRED as blank transcript and no `duration_ms`, since the clip can't see the phone's flag.
+    - HTTP code 0 gives plain "Network error" (retry). Retry delay uses integer maths (may differ from Kotlin by 1 ms). Error messages are cut at 200 code points, and at about 250 bytes, so a message in a non-Latin script is shorter.
+    - Base64 decode skips anything outside the alphabet and stops at `=`; a dangling single character is unreadable.
+    - `cap_backoff_ms`: 30 s doubling up to 5 h, standing in for WorkManager.
+  - **D.3's policy:** a hold whose last note is gone from GitHub (`CAP_GONE`) becomes a new note.
+  - **Prompts:** `prompts/system_prompt.txt`, `system_prompt_append.txt` and `response_schema.json` are copies of Capture's `res/raw`. The owner allowed publishing them (2026-09-30: "I truly don't care about the prompts texts ... as long as it doesn't contain passwords"). A local-only test fails when they or the `CAP_GEMINI_*` values drift from `~/Projects/capture`.
+  - **Tests:** `test_capture_note.c` (53: every `NoteFileTest.kt` and `AdditionsTest.kt` case, 7 synthetic golden files in `firmware/test/fixtures/capture/`, and a local-only round trip of the real files in `~/Ideas/notes`, which prints names and offsets only), `test_capture_gemini.c` (40: `GeminiTest.kt`, `RateGateTest.kt`, exact request strings, quota reset across both DST changes), `test_capture_github.c` (25: `GitHubTest.kt`, and every loop against a scripted mock server). Written by three subagents in parallel; they found one bug (`cap_iso_parse` accepted offsets past ±18:00). The GitHub test was also run against five deliberately broken copies and caught each.
+  - **Not verified:** out-of-memory paths (no fault injection); the expected request JSON comes from reading `Gemini.kt`, not from running it (Phase D.5's real request settles that); kotlinx accepting token counts as quoted strings; the merge against a run of `capture-notes` itself.
+- **Parallel work (owner's request, 2026-09-30):** "parallelism sounds like a good idea and I'm not really sure why we haven't done that ... change the PCB skill to say that we should definitely use parallelism and sub agents whenever suitable and possible". Added to the pcb-pipeline skill and `docs/workflow.md` ("Working in parallel"): firmware and the circuit/layout/case rounds are parallel tracks once the spec exists; independent work goes to subagents; money, quota, one board's gates and owner questions stay serial. For capture-clip: Phase E's rounds start alongside D.3; the order still waits for D.5.
+- **Owner-choice rule also in `CLAUDE.md`** (2026-09-30), so it loads every session, not only with the skill.
 - **Not verified yet:** assembled boards and 3D prints in one JLC parcel (ask JLC before the first order); HTTPS from Wokwi to Gemini and GitHub; the Opus encoder's real CPU load on silicon (Phase D.5).
 
 ## D-024 First project: capture-clip, a battery voice-note button for Capture (DECIDED, brainstorm closed by the owner, 2026-09-29)

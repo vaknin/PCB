@@ -8,6 +8,12 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
 
 **Choices the owner makes** (at any step): what the owner sees, holds or pays for (the case's material, colour and finish, the board's colour, size against battery life, features, cost tiers) is shown on an Artifact choice page, with a picture, the price difference and the trade-offs of each option and Claude's recommendation first, then asked as a one-click question. Technical choices stay Claude's (DECISIONS.md). Details: the pcb-pipeline skill, "Choices the owner makes".
 
+**Working in parallel** (owner's request, 2026-09-30): the steps below are tracks, not a queue.
+- Once the spec and `board.toml` exist, the firmware (step 3) and the circuit, layout and case rounds (step 4) run at the same time, so the owner sees a board and a case early. Nothing is ordered before freeze, so a firmware finding that changes the board costs a re-run, not money. Only the order (step 5) waits for every track.
+- Independent pieces of work go to subagents running side by side: research, one module or test file each, the reviewer, the variants for a choice page. Each gets a full brief and its own files; agents that would touch the same files work in separate worktrees.
+- One at a time: anything that costs money or quota, the gates on one board directory, and questions to the owner.
+- Claude reads each agent's report and then runs the whole check itself; an agent saying "passes" is not a gate.
+
 ## 2. Spec: `boards/<name>/spec.md` + `board.toml`
 - **`spec.md`** is plain Markdown on a fixed template (`templates/spec.md`):
   - purpose; where it lives

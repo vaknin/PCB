@@ -153,6 +153,8 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - Its Ogg: pre-skip 0, OpusHead input rate 48000, no end-of-stream flag on the last page, and a last granule one packet short (an ffmpeg dts warning). ffmpeg and Gemini (gemini-3.5-flash-lite, one request) both accept the file. A copy cut at any byte decodes up to its last complete page.
   - QEMU needs the `sim` stage's otadata entry for any app on this flash layout, not only for rollback builds: without it, QEMU crashes (SIGSEGV) as the app starts, even with `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` off.
   - QEMU timing is not silicon timing (encode real-time factor 0.04 in QEMU).
+- **ESP-IDF v6.1 has no `json` component** (verified 2026-09-30: nothing matching in `components/`). cJSON would be a managed component; the capture component has its own small reader instead (D-025 Phase D.2).
+- **Java/Kotlin text rules a C port must copy** (verified by the ported Capture tests, 2026-09-30): Kotlin's `trim()` and `isBlank()` use Unicode whitespace (U+00A0, U+2003 and U+3000 are trimmed; INFERRED from the JVM's definition, not a Kotlin run), Java's regex `\s` is ASCII only, and `OffsetDateTime.parse` rejects offsets past ±18:00.
 
 ## Mistakes to avoid
 - **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
