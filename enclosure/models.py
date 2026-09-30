@@ -11,6 +11,7 @@ variable to lib/3dmodels, so each model is stored under the name its footprint a
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,11 +30,15 @@ KICAD = [
     "Button_Switch_SMD.3dshapes/SW_SPST_TS-1088-xR020.step",
     "Capacitor_SMD.3dshapes/C_0805_2012Metric.step",
     "Connector_JST.3dshapes/JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal.step",
+    "Diode_SMD.3dshapes/D_SOD-123.step",
     "Diode_SMD.3dshapes/D_SOD-123F.step",
     "Fuse.3dshapes/Fuse_1206_3216Metric.step",
     "LED_SMD.3dshapes/LED_0805_2012Metric.step",
     "Package_TO_SOT_SMD.3dshapes/SOT-223.step",
     "Package_TO_SOT_SMD.3dshapes/SOT-23.step",
+    "Package_TO_SOT_SMD.3dshapes/SOT-23-5.step",
+    "Package_TO_SOT_SMD.3dshapes/SOT-23-6.step",
+    "Package_TO_SOT_SMD.3dshapes/TSOT-23-5.step",
     "Resistor_SMD.3dshapes/R_0805_2012Metric.step",
     "RF_Module.3dshapes/ESP32-S3-WROOM-1.step",
     "Sensor_Audio.3dshapes/InvenSense_ICS-43434-6_3.5x2.65mm.step",
@@ -73,6 +78,17 @@ EASYEDA = [
         "move": [1.0, -2.75, 0.0],
         "why": "signal legs centred on pads 1-2 (x ±1, footprint y -2.85), body x ±3.95 and "
         "mouth at the F.Fab edge y = +4.40",
+    },
+]
+
+# Parts with no usable model anywhere: a plain box from the datasheet's body size, centred on the
+# footprint's origin, sitting on the PCB (z 0 = the board's top face).
+DRAWN = [
+    {
+        "path": "LED_SMD.3dshapes/LED_LiteOn_LTST-C19HE1WT.step",
+        "box": [1.6, 1.6, 0.35],
+        "why": "Lite-On LTST-C19HE1WT datasheet p.1: 1.6 x 1.6 mm, 'Extra Thin (0.35Hmm)' (read 2026-09-30); "
+        "KiCad ships none and EasyEDA's is -0.11..0.25 mm",
     },
 ]
 
@@ -117,10 +133,23 @@ def fetch_easyeda(e: dict) -> dict:
     }
 
 
+def draw(e: dict) -> dict:
+    import cadquery as cq
+
+    x, y, z = e["box"]
+    dst = OUT / e["path"]
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    cq.exporters.export(cq.Workplane("XY").box(x, y, z, centered=(True, True, False)), str(dst))
+    # OCCT stamps the time of writing: keep a fixed one so the file (and its sha256) can be redrawn
+    text = dst.read_text()
+    dst.write_text(re.sub(r"(FILE_NAME\('[^']*',')[0-9T:-]+'", r"\g<1>2026-09-30T00:00:00'", text, count=1))
+    return {"source": "drawn by enclosure/models.py: a box from the datasheet", "box": e["box"], "why": e["why"]}
+
+
 def main() -> int:
     check = "--check" in sys.argv[1:]
     manifest = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
-    wanted = KICAD + [e["path"] for e in EASYEDA]
+    wanted = KICAD + [e["path"] for e in EASYEDA] + [e["path"] for e in DRAWN]
     bad = 0
     for rel in wanted:
         dst = OUT / rel
@@ -133,7 +162,8 @@ def main() -> int:
             continue
         print(f"fetching {rel}")
         e = next((e for e in EASYEDA if e["path"] == rel), None)
-        entry = fetch_easyeda(e) if e else fetch_kicad(rel)
+        d = next((d for d in DRAWN if d["path"] == rel), None)
+        entry = draw(d) if d else fetch_easyeda(e) if e else fetch_kicad(rel)
         entry["sha256"] = sha256(dst)
         manifest[rel] = entry
     for rel in sorted(set(manifest) - set(wanted)):

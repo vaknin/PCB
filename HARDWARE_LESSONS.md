@@ -161,6 +161,14 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - KiCad's `power` library has `+BATT` and `VBUS` but no `VSYS`; it becomes the local net `/VSYS`, so its net-class pattern needs `*VSYS`.
   - A charger without input-current limiting counts fully against the USB budget, on top of the board's own peak.
 
+- **Case stage lessons from capture-clip (2026-09-30):**
+  - CadQuery's point-in-solid test takes a `cq.Vertex`, not a `cq.Vector`: `case.py`'s tray-side check crashed in code that had never been run. Run `test_case.py` after every `case.py` change.
+  - `[case.battery] at` is in KiCad page mm (board top-left = 100, 100), not layout mm.
+  - An M2 standoff's foot is Ø7.4, wider than its Ø5.4 boss: keep a battery pocket 3.9 mm from a mounting hole's centre.
+  - A printed button cap needs about 2.6 mm between the switch top and the lid's underside (rest gap, stem, flange); set `top_gap` from that when the switch is the tallest part.
+  - Freerouting's log can say "1 unrouted" on a board KiCad's DRC finds fully connected (capture-clip orders 0 and 3). The DRC is the gate.
+  - `Button_Switch_SMD:SW_Push_1TS009xxxx…` prints a literal "REF**" on the silkscreen (cosmetic; seen on capture-clip's render).
+
 ## Mistakes to avoid
 - **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
 - **Run a DRC before routing.** Courtyard overlaps, silk collisions and parity errors show up there, and they are cheaper to fix than after a 1-minute route.

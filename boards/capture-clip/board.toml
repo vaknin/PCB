@@ -42,7 +42,7 @@ net = "CHRG_SENSE"
 gpio = 4
 dir = "in"
 active_low = true
-note = "TP4057 CHRG (open drain, low while charging) through 100k (R5); internal pull-up only while VBUS_SENSE is high, off before sleep"
+note = "TP4057 CHRG (open drain, low while charging) through 100k (R5); never an internal pull-up (a low would read as ~2.4 V); the charge light pulls it high"
 
 [[pin]]
 signal = "STDBY"
@@ -62,12 +62,13 @@ dir = "out"
 note = "the microphone's VDD through R18 (0 ohm), about 0.5 mA; high = on; stop and ground SCK/WS before switching it off; held low in sleep"
 
 [[pin]]
-signal = "SPARE_IO7"
+signal = "CHG_FAST"
 pin = "IO7"
-net = "SPARE_IO7"
+net = "CHG_FAST_N"
 gpio = 7
-dir = "io"
-note = "spare, on test point TP8 (rework)"
+dir = "out"
+active_low = true
+note = "fast charge: open drain; low = R19 (4.3k) in parallel with R3 on the TP4057's PROG = ~333 mA; released (hi-Z) = 100 mA. Never driven high, no pulls. Released whenever Wi-Fi is on, asleep and at reset"
 
 [[pin]]
 signal = "LED_R"
@@ -129,7 +130,7 @@ pin = "IO21"
 net = "SPARE_IO21"
 gpio = 21
 dir = "io"
-note = "spare, on test point TP9 (rework)"
+note = "spare, on test point TP8 (rework)"
 
 [[pin]]
 signal = "UART_TX"
@@ -165,8 +166,14 @@ note = "native USB (flashing, serial console, provisioning)"
 
 # --- Power ------------------------------------------------------------------------------
 # On USB the board runs and charges at once, and both currents come out of the port (the
-# power path has no input-current limit). That is why the charger is set to 100 mA, not the
-# plan's 300 mA: 355 + 300 would be over a USB 2.0 port's 500 mA.
+# power path has no input-current limit). That is why the charger's default is 100 mA (R3):
+# 355 + 300 would be over a USB 2.0 port's 500 mA.
+# Fast charge (CHG_FAST low, ~333 mA) is a firmware state that never overlaps Wi-Fi: the
+# firmware releases CHG_FAST before it turns the radio on. [power] adds every load, it can't
+# say "these two exclude each other", so the usb budget below is the Wi-Fi case (355 + 100 mA
+# + the small loads = the larger sum). The other case is 333 mA + the chip without its radio
+# (INFERRED ~100 mA at most, CPU and lights on) = ~435 mA, which is smaller. The rule itself
+# is the firmware's (self-test "battery" / the clip's power module), not something a gate checks.
 
 [[power.source]]
 name = "usb"
@@ -178,19 +185,19 @@ ma = 500
 source = "USB 2.0; that every port and charger gives at least this is INFERRED"
 
 [[power.source.limit]]
-name = "RT9080 LDO output"
-ma = 600
-source = "RT9080 datasheet p.4 (research/2026-09-29-parts-capture-clip.md §4)"
+name = "HE9073 LDO output"
+ma = 500
+source = "HE9073 datasheet p.5: 500 mA typical at 0.5 V dropout; limit 550 mA typical, no minimum given (research/2026-09-30-power-path-fix.md)"
 
 [[power.source]]
 name = "battery"
-what = "single-cell protected LiPo (JST PH) through the AO3401A power path and the RT9080 LDO"
+what = "single-cell protected LiPo (JST PH) through the AO3401A power path and the HE9073 LDO"
 sleep_ua = 20
 
 [[power.source.limit]]
-name = "RT9080 LDO output"
-ma = 600
-source = "RT9080 datasheet p.4 (research/2026-09-29-parts-capture-clip.md §4)"
+name = "HE9073 LDO output"
+ma = 500
+source = "HE9073 datasheet p.5: 500 mA typical at 0.5 V dropout; limit 550 mA typical, no minimum given (research/2026-09-30-power-path-fix.md)"
 
 [[power.source.limit]]
 name = "cell peak discharge"
@@ -203,10 +210,10 @@ ma = 355
 source = "WROOM-1 datasheet v1.8 (HARDWARE_LESSONS.md)"
 
 [[power.load]]
-name = "Battery charger TP4057 (RPROG 10k)"
+name = "Battery charger TP4057 while Wi-Fi may be on (R3 10k alone; fast charge ~333 mA only with the radio off)"
 ma = 100
 from = ["usb"]
-source = "TP4057 datasheet p.7 table: 10k = 100 mA (research/2026-09-29-parts-capture-clip.md §2)"
+source = "TP4057 datasheet p.7 table: 10k = 100 mA (research/2026-09-29-parts-capture-clip.md §2); 10k || 4.3k = 3.0k = ~333 mA per research/2026-09-30-datasheet-check-capture-clip.md"
 
 [[power.load]]
 name = "Charge light D1 (5 V through 1k)"
@@ -231,14 +238,14 @@ source = "3.3 V / 10k, from the circuit"
 
 [[power.load]]
 name = "USB sense divider and gate pull-down (R16 + R17, R6)"
-ma = 0.08
+ma = 0.55
 from = ["usb"]
-source = "5.25 V / 250k + 5.25 V / 100k, from the circuit"
+source = "5.25 V / 250k + 5.25 V / 10k, from the circuit"
 
 [[power.load]]
 name = "LDO's own current and the battery divider"
 ma = 0.01
-source = "RT9080 Iq 4 µA max (datasheet p.4) + 4.2 V / 3 M; rounded up"
+source = "HE9073 Iq 0.7 µA max (datasheet p.5) + 4.2 V / 3 M; rounded up"
 
 # Asleep on the cell. Maximum figures where the datasheet gives one, typical where it doesn't.
 [[power.sleep_load]]
@@ -247,9 +254,9 @@ ua = 8
 source = "VERIFIED typical, no maximum given: ESP32-S3 datasheet v2.2 Table 5-10 p.68, WROOM-1 v1.8 Table 6-7 p.30 (research/2026-09-29-esp32-firmware.md §1)"
 
 [[power.sleep_load]]
-name = "RT9080 LDO quiescent current"
-ua = 4
-source = "VERIFIED maximum (2 typical): RT9080 datasheet p.4 (parts research §4). In dropout (cell near 3.3 V) it is not specified: UNVERIFIED"
+name = "HE9073 LDO quiescent current"
+ua = 0.7
+source = "VERIFIED maximum (0.3 typical): HE9073 datasheet p.5. In dropout: flat in Fig. 2 p.6 (typical, figure only)"
 
 [[power.sleep_load]]
 name = "TP4057 charger, battery pin with USB absent"
@@ -262,9 +269,9 @@ ua = 1.4
 source = "INFERRED arithmetic: 4.2 V / 3 M"
 
 [[power.sleep_load]]
-name = "Schottky D2 reverse leakage into the 100k pull-down"
-ua = 3
-source = "INFERRED: RB160M-30 is rated <= 40 µA at 30 V; at ~4 V the figure is only on a graph (UNVERIFIED, parts research §3)"
+name = "Schottky D2 reverse leakage into the 10k pull-down"
+ua = 0.55
+source = "VERIFIED maximum at 40 V, 25 °C: RB168MM-40 datasheet p.1. At 5 V: ~0.008 µA at 25 °C, ~0.9 µA at 75 °C typical (Fig. p.2); ~0.2 typical / ~2.5 worst at 60 °C is INFERRED"
 
 [[power.sleep_load]]
 name = "Microphone (VDD off), lights (pins held high), USB sense divider (no USB)"
@@ -276,7 +283,7 @@ source = "INFERRED from the circuit: each is switched off or unpowered asleep"
 [[requirement]]
 id = "R1"
 text = "Runs from a single-cell LiPo battery and from USB-C, and charges the battery from any USB-C charger or computer port (5 V, no USB-PD)"
-covered_by = ["part:J1", "part:R1", "part:R2", "part:J2", "part:U2", "part:Q1", "part:D2", "part:U4", "power:usb", "power:battery"]
+covered_by = ["part:J1", "part:R1", "part:R2", "part:J2", "part:U2", "part:Q1", "part:D2", "part:U4", "pin:CHG_FAST", "power:usb", "power:battery"]
 
 [[requirement]]
 id = "R2"
@@ -342,23 +349,23 @@ notes_repo = "prompt"
 gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
 github_token = { from = "file:~/.config/capture-notes/config#github_token", expires = "2027-09-18" }
 
-# The printed case: first draft, before any layout (Phase E.4 makes it real). The cell
-# (Adafruit #3898, 36 x 17 x 7.8 mm) lies under the board; bottom_gap holds
-# 7.8 + 0.78 swell + 0.2 clearance = 8.78 mm. Material and colour are the owner's choice
-# (a choice page at the first round with a case); resin is only the starting value.
+# The printed case (Phase E.4). The cell (Adafruit #3898, 36 x 17 x 7.8 mm) lies on the tray
+# floor under the board; bottom_gap holds 7.8 + 0.78 swell + 0.2 clearance = 8.78 mm. Material and
+# colour are the owner's choice (a choice page at the first round with a case); resin is only the
+# starting value.
 [case]
 material = "resin"
 wall = 1.5
 floor = 1.5
 edge_gap = 0.3
-top_gap = 1.0
+top_gap = 2.2              # room for the button cap over the 5 mm switch (flange + stem under the lid)
 bottom_gap = 9.0
 min_clearance = 0.2
 screw = "M2"
 
 [case.battery]
 size = [36.0, 17.0, 7.8]   # parts research §10 (adafruit.com/product/3898)
-at = [15.0, 34.0]          # first intent: clear of the antenna end (top) and the USB-C legs (bottom)
+at = [115.0, 136.0]        # centre, KiCad page mm (the board's top-left is 100, 100): cell x 6.5..23.5, y 18..54 on the board
 rotate = true              # length along the board's long side
 lead = "J2"
 
@@ -379,9 +386,10 @@ ref = "D1"            # charge light
 kind = "led"
 
 [[case.opening]]
-ref = "MK1"           # microphone sound hole (see the report: the mic's port is on the PCB's other face)
+ref = "MK1"           # microphone: bottom-port, its sound hole goes through the PCB, so the opening is in the tray
 kind = "pinhole"
-diameter = 1.0
+side = "bottom"
+diameter = 1.5        # printable in resin (>= 1.0) and nylon (>= 1.5)
 
 [[case.opening]]
 ref = "SW2"           # reset: a pinhole for a paper clip

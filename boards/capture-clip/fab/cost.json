@@ -1,0 +1,497 @@
+{
+  "date": "2026-09-30",
+  "source": "https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList",
+  "order": {
+    "bare_boards": 5,
+    "assembled": 2
+  },
+  "lines": [
+    {
+      "lcsc": "C28323",
+      "comment": "1u",
+      "refs": [
+        "C1",
+        "C7"
+      ],
+      "library": "basic",
+      "stock": 2315325,
+      "per_board": 2,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0397,
+      "line_usd": 0.79,
+      "short": false
+    },
+    {
+      "lcsc": "C15850",
+      "comment": "10u",
+      "refs": [
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "library": "basic",
+      "stock": 5019801,
+      "per_board": 3,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0651,
+      "line_usd": 1.3,
+      "short": false
+    },
+    {
+      "lcsc": "C45783",
+      "comment": "22u",
+      "refs": [
+        "C5"
+      ],
+      "library": "basic",
+      "stock": 4015679,
+      "per_board": 1,
+      "minimum": 2,
+      "attrition": 0,
+      "order_qty": 2,
+      "unit_usd": 0.2201,
+      "line_usd": 0.44,
+      "short": false
+    },
+    {
+      "lcsc": "C49678",
+      "comment": "100n",
+      "refs": [
+        "C6",
+        "C8",
+        "C9"
+      ],
+      "library": "basic",
+      "stock": 19392260,
+      "per_board": 3,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0189,
+      "line_usd": 0.38,
+      "short": false
+    },
+    {
+      "lcsc": "C84256",
+      "comment": "red",
+      "refs": [
+        "D1"
+      ],
+      "library": "basic",
+      "stock": 4839544,
+      "per_board": 1,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0134,
+      "line_usd": 0.27,
+      "short": false
+    },
+    {
+      "lcsc": "C509936",
+      "comment": "RB168MM-40",
+      "refs": [
+        "D2"
+      ],
+      "library": "extended",
+      "stock": 39670,
+      "per_board": 1,
+      "minimum": 2,
+      "attrition": 0,
+      "order_qty": 2,
+      "unit_usd": 0.1174,
+      "line_usd": 0.23,
+      "short": false
+    },
+    {
+      "lcsc": "C19077497",
+      "comment": "SMF5.0A",
+      "refs": [
+        "D3"
+      ],
+      "library": "preferred",
+      "stock": 165114,
+      "per_board": 1,
+      "minimum": 15,
+      "attrition": 4,
+      "order_qty": 15,
+      "unit_usd": 0.0282,
+      "line_usd": 0.42,
+      "short": false
+    },
+    {
+      "lcsc": "C458749",
+      "comment": "RGB",
+      "refs": [
+        "D4"
+      ],
+      "library": "extended",
+      "stock": 112695,
+      "per_board": 1,
+      "minimum": 5,
+      "attrition": 4,
+      "order_qty": 6,
+      "unit_usd": 0.0727,
+      "line_usd": 0.44,
+      "short": false
+    },
+    {
+      "lcsc": "C165948",
+      "comment": "USB-C",
+      "refs": [
+        "J1"
+      ],
+      "library": "extended",
+      "stock": 418781,
+      "per_board": 1,
+      "minimum": 2,
+      "attrition": 0,
+      "order_qty": 2,
+      "unit_usd": 0.1857,
+      "line_usd": 0.37,
+      "short": false
+    },
+    {
+      "lcsc": "C295747",
+      "comment": "LiPo",
+      "refs": [
+        "J2"
+      ],
+      "library": "extended",
+      "stock": 21175,
+      "per_board": 1,
+      "minimum": 2,
+      "attrition": 0,
+      "order_qty": 2,
+      "unit_usd": 0.2364,
+      "line_usd": 0.47,
+      "short": false
+    },
+    {
+      "lcsc": "C5656610",
+      "comment": "ICS-43434",
+      "refs": [
+        "MK1"
+      ],
+      "library": "extended",
+      "stock": 1271,
+      "per_board": 1,
+      "minimum": 0,
+      "attrition": 0,
+      "order_qty": 2,
+      "unit_usd": 4.3136,
+      "line_usd": 8.63,
+      "short": false
+    },
+    {
+      "lcsc": "C15127",
+      "comment": "AO3401A",
+      "refs": [
+        "Q1"
+      ],
+      "library": "basic",
+      "stock": 801584,
+      "per_board": 1,
+      "minimum": 5,
+      "attrition": 4,
+      "order_qty": 6,
+      "unit_usd": 0.0942,
+      "line_usd": 0.57,
+      "short": false
+    },
+    {
+      "lcsc": "C27834",
+      "comment": "5.1k",
+      "refs": [
+        "R1",
+        "R2"
+      ],
+      "library": "basic",
+      "stock": 3435700,
+      "per_board": 2,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0056,
+      "line_usd": 0.11,
+      "short": false
+    },
+    {
+      "lcsc": "C17514",
+      "comment": "1M",
+      "refs": [
+        "R13",
+        "R14",
+        "R15"
+      ],
+      "library": "basic",
+      "stock": 2432161,
+      "per_board": 3,
+      "minimum": 20,
+      "attrition": 6,
+      "order_qty": 20,
+      "unit_usd": 0.0043,
+      "line_usd": 0.09,
+      "short": false
+    },
+    {
+      "lcsc": "C149504",
+      "comment": "100k",
+      "refs": [
+        "R5",
+        "R9",
+        "R16"
+      ],
+      "library": "basic",
+      "stock": 4242791,
+      "per_board": 3,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0059,
+      "line_usd": 0.12,
+      "short": false
+    },
+    {
+      "lcsc": "C17470",
+      "comment": "150k",
+      "refs": [
+        "R17"
+      ],
+      "library": "basic",
+      "stock": 1015508,
+      "per_board": 1,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0048,
+      "line_usd": 0.1,
+      "short": false
+    },
+    {
+      "lcsc": "C17477",
+      "comment": "0",
+      "refs": [
+        "R18"
+      ],
+      "library": "basic",
+      "stock": 6878213,
+      "per_board": 1,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0044,
+      "line_usd": 0.09,
+      "short": false
+    },
+    {
+      "lcsc": "C17667",
+      "comment": "4.3k",
+      "refs": [
+        "R19"
+      ],
+      "library": "preferred",
+      "stock": 172756,
+      "per_board": 1,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0079,
+      "line_usd": 0.16,
+      "short": false
+    },
+    {
+      "lcsc": "C17414",
+      "comment": "10k",
+      "refs": [
+        "R3",
+        "R6",
+        "R7",
+        "R8"
+      ],
+      "library": "basic",
+      "stock": 60509212,
+      "per_board": 4,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.0033,
+      "line_usd": 0.07,
+      "short": false
+    },
+    {
+      "lcsc": "C17513",
+      "comment": "1k",
+      "refs": [
+        "R4",
+        "R10",
+        "R11",
+        "R12"
+      ],
+      "library": "basic",
+      "stock": 31290101,
+      "per_board": 4,
+      "minimum": 20,
+      "attrition": 10,
+      "order_qty": 20,
+      "unit_usd": 0.004,
+      "line_usd": 0.08,
+      "short": false
+    },
+    {
+      "lcsc": "C319409",
+      "comment": "BUTTON",
+      "refs": [
+        "SW1"
+      ],
+      "library": "extended",
+      "stock": 39679,
+      "per_board": 1,
+      "minimum": 5,
+      "attrition": 1,
+      "order_qty": 5,
+      "unit_usd": 0.0943,
+      "line_usd": 0.47,
+      "short": false
+    },
+    {
+      "lcsc": "C720477",
+      "comment": "RESET",
+      "refs": [
+        "SW2"
+      ],
+      "library": "basic",
+      "stock": 793124,
+      "per_board": 1,
+      "minimum": 5,
+      "attrition": 4,
+      "order_qty": 6,
+      "unit_usd": 0.0537,
+      "line_usd": 0.32,
+      "short": false
+    },
+    {
+      "lcsc": "C2913202",
+      "comment": "ESP32-S3-WROOM-1-N16R8",
+      "refs": [
+        "U1"
+      ],
+      "library": "extended",
+      "stock": 29811,
+      "per_board": 1,
+      "minimum": 0,
+      "attrition": 0,
+      "order_qty": 2,
+      "unit_usd": 5.136,
+      "line_usd": 10.27,
+      "short": false
+    },
+    {
+      "lcsc": "C12044",
+      "comment": "TP4057",
+      "refs": [
+        "U2"
+      ],
+      "library": "preferred",
+      "stock": 33042,
+      "per_board": 1,
+      "minimum": 5,
+      "attrition": 2,
+      "order_qty": 5,
+      "unit_usd": 0.141,
+      "line_usd": 0.71,
+      "short": false
+    },
+    {
+      "lcsc": "C20615824",
+      "comment": "H5VUT2U",
+      "refs": [
+        "U3"
+      ],
+      "library": "preferred",
+      "stock": 129691,
+      "per_board": 1,
+      "minimum": 10,
+      "attrition": 4,
+      "order_qty": 10,
+      "unit_usd": 0.0579,
+      "line_usd": 0.58,
+      "short": false
+    },
+    {
+      "lcsc": "C723789",
+      "comment": "HE9073A33M5R",
+      "refs": [
+        "U4"
+      ],
+      "library": "extended",
+      "stock": 55430,
+      "per_board": 1,
+      "minimum": 5,
+      "attrition": 2,
+      "order_qty": 5,
+      "unit_usd": 0.1156,
+      "line_usd": 0.58,
+      "short": false
+    }
+  ],
+  "fees": [
+    {
+      "name": "pcb",
+      "usd": 4.0,
+      "source": "5 bare 2-layer PCBs up to 100x100 mm, quote form 2026-09-29"
+    },
+    {
+      "name": "setup",
+      "usd": 8.18,
+      "source": "Economic PCBA setup, help page 2026-09-09"
+    },
+    {
+      "name": "stencil",
+      "usd": 1.53,
+      "source": "Economic PCBA stencil, help page 2026-09-09"
+    },
+    {
+      "name": "per_joint",
+      "usd": 0.0016,
+      "source": "per solder joint, help page 2026-09-09"
+    },
+    {
+      "name": "extended",
+      "usd": 3.07,
+      "source": "per unique Extended part (Basic and Preferred Extended: none), help page 2026-09-09"
+    }
+  ],
+  "joints_per_board": 179,
+  "totals_usd": {
+    "parts": 28.04,
+    "extended_fees": 24.56,
+    "extended_parts": [
+      "C165948",
+      "C2913202",
+      "C295747",
+      "C319409",
+      "C458749",
+      "C509936",
+      "C5656610",
+      "C723789"
+    ],
+    "joints": 0.57,
+    "pcb_setup_stencil": 13.71,
+    "per_design": 66.89
+  },
+  "alone_in_a_parcel_usd": {
+    "shipping_fedex": 29.59,
+    "vat": 0.0,
+    "total": 96.48
+  },
+  "notes": [
+    "Order quantity per line = parts for the assembled boards + attrition, at least the minimum (INFERRED model).",
+    "Joints = pads of the assembled parts on the board (INFERRED; JLCPCB counts its own).",
+    "Shipping and VAT are per parcel; several designs share one (D-021)."
+  ]
+}

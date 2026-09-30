@@ -1,0 +1,152 @@
+{
+  "unrouted_connections": 0,
+  "track_segments": 457,
+  "track_length_mm": {
+    "B.Cu": 469.2,
+    "F.Cu": 653.4
+  },
+  "vias_total": 72,
+  "vias_gnd": 20,
+  "vias_signal": 52,
+  "vias_by_net": {
+    "+3V3": 4,
+    "+BATT": 3,
+    "/BAT_DIV": 2,
+    "/BUTTON_N": 2,
+    "/CC1": 2,
+    "/CHG_FAST_N": 2,
+    "/CHRG_LED": 2,
+    "/CHRG_N": 3,
+    "/CHRG_SENSE": 2,
+    "/EN": 2,
+    "/I2S_SCK": 2,
+    "/I2S_SD": 2,
+    "/I2S_WS": 2,
+    "/LED_G_K": 2,
+    "/LED_R_K": 2,
+    "/MIC_PWR": 2,
+    "/STDBY_N": 4,
+    "/USB_D+": 3,
+    "/USB_D-": 2,
+    "/VBUS_SENSE": 2,
+    "GND": 20,
+    "VBUS": 3,
+    "unconnected-(J2-MountPin-PadMP)": 2
+  },
+  "copper_in_keepouts": [],
+  "thinner_than_class_mm": {},
+  "pours": {
+    "GND F.Cu": {
+      "pieces": 6,
+      "filled_pct": 43.9,
+      "largest_piece_pct_of_fill": 37.6
+    },
+    "GND B.Cu": {
+      "pieces": 3,
+      "filled_pct": 60.1,
+      "largest_piece_pct_of_fill": 45.9
+    }
+  },
+  "router": {
+    "kept_order": 3,
+    "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest; of the best `drc_checks` orders, finished and checked, the first with no open DRC item, else the fewest; if none is clean, the other routed orders are checked, then `extra_rounds` of `extra_tries` new orders (D-020)",
+    "steps": [
+      "checked the best 3 of 8 routed orders"
+    ],
+    "orders": [
+      {
+        "order": 0,
+        "unrouted": {
+          "/I2S_SCK": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 62,
+        "track_length_mm": 1104.8,
+        "freerouting_clearance_violations": 16,
+        "drc_open": null
+      },
+      {
+        "order": 1,
+        "unrouted": {
+          "/MIC_VDD": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 53,
+        "track_length_mm": 1090.5,
+        "freerouting_clearance_violations": 16,
+        "drc_open": 1
+      },
+      {
+        "order": 2,
+        "unrouted": {},
+        "pour_net_unrouted": 2,
+        "thinner_than_class_mm": 0.0,
+        "vias": 57,
+        "track_length_mm": 1111.7,
+        "freerouting_clearance_violations": 16,
+        "drc_open": 1
+      },
+      {
+        "order": 3,
+        "unrouted": {},
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 59,
+        "track_length_mm": 1122.6,
+        "freerouting_clearance_violations": 16,
+        "drc_open": 0
+      },
+      {
+        "order": 4,
+        "unrouted": {
+          "/MIC_VDD": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 54,
+        "track_length_mm": 1138.7,
+        "freerouting_clearance_violations": 16,
+        "drc_open": null
+      },
+      {
+        "order": 5,
+        "unrouted": {
+          "/MIC_VDD": 1,
+          "VBUS": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 56,
+        "track_length_mm": 1091.9,
+        "freerouting_clearance_violations": 16,
+        "drc_open": null
+      },
+      {
+        "order": 6,
+        "unrouted": {
+          "/MIC_VDD": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 59,
+        "track_length_mm": 1150.7,
+        "freerouting_clearance_violations": 16,
+        "drc_open": null
+      },
+      {
+        "order": 7,
+        "unrouted": {
+          "/VSYS": 1
+        },
+        "pour_net_unrouted": 1,
+        "thinner_than_class_mm": 0.0,
+        "vias": 55,
+        "track_length_mm": 1111.7,
+        "freerouting_clearance_violations": 16,
+        "drc_open": null
+      }
+    ]
+  }
+}

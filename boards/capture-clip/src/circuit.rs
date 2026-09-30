@@ -1,7 +1,7 @@
 //! Capture clip, revision A: the circuit (docs/plan.md Phase E.1, D-024, D-025).
 //!
 //! USB-C (power + native USB) and a single-cell LiPo feed VSYS through a discrete power path;
-//! a 2 µA LDO makes 3.3 V for the ESP32-S3-WROOM-1. A TP4057 charges the cell from USB at
+//! a 0.3 µA LDO makes 3.3 V for the ESP32-S3-WROOM-1. A TP4057 charges the cell from USB at
 //! 100 mA. One I2S microphone (powered from a GPIO so it draws nothing asleep), one RGB light,
 //! one button that also wakes the chip, a reset button, test points.
 //!
@@ -21,7 +21,8 @@
 //!   I2S SCK/WS/SD IO11/12/13 (pads 19/20/21)
 //!   USB D-/D+   IO19/IO20 (pads 13/14, fixed by the chip)
 //!   UART0       TXD0/RXD0 (pads 37/36) to test points only
-//!   spares      IO7, IO21 to test points (rework)
+//!   CHG_FAST_N  IO7   (pad 7)   second PROG resistor (4.3k): low = ~333 mA charge, hi-Z = 100 mA
+//!   spare       IO21 to a test point (rework)
 //! Avoided: strapping pins IO3/IO45/IO46, IO35-37 (octal PSRAM), IO39-42 (pad JTAG).
 
 use pcbgen::circuit::{Circuit, NetId};
@@ -44,6 +45,9 @@ fn lcsc(value: &str) -> &'static str {
         "1k" => "C17513",
         "100k" => "C149504",
         "150k" => "C17470",
+        // 4.3k: C17667 (UNI-ROYAL 0805W8F4301T5E), read from JLCPCB's parts API on 2026-09-30:
+        // Preferred Extended (no loading fee, like Basic), 172,996 in stock. No Basic 0805 4.3k was found.
+        "4.3k" => "C17667",
         "1M" => "C17514",
         "100n" => "C49678",
         "1u" => "C28323",
@@ -107,7 +111,7 @@ pub fn build() -> Circuit {
     c.connect(dm, esd, &["2"]);
     c.connect(gnd, esd, &["3"]);
     // No fuse here, unlike the starter (INFERRED to be enough; for the reviewer): the charger
-    // limits itself to 100 mA and the LDO to ~1.1 A, and a PTC is one more Extended part.
+    // limits itself to 100 mA and the LDO to ~0.55 A, and a PTC is one more Extended part.
     let d3 = c
         .part("D3", "Diode:SMF5V0A", "SMF5.0A", "Diode_SMD:D_SOD-123F")
         .lcsc("C19077497")
@@ -145,6 +149,14 @@ pub fn build() -> Circuit {
     // 355 mA (Wi-Fi peak) + 300 mA is over a USB 2.0 port's 500 mA (board.toml [power]).
     // A 400 mAh cell fills in about 5 hours. 3 kΩ would be C17661.
     r(&mut c, "R3", "10k", prog, gnd, chg);
+    // Fast charge, switched by the firmware (owner's request, 2026-09-30): a second PROG resistor
+    // to GPIO7. Pin low (open drain, no pulls): 10k || 4.3k = 3.0k = ~333 mA (datasheet check). Pin released (hi-Z: asleep, in
+    // reset, unprogrammed): R3 alone = 100 mA, the safe default. The firmware releases it whenever
+    // Wi-Fi is on, so 355 + 333 mA never add up on the USB port. INFERRED to work: PROG sits near
+    // 1 V while charging, so the pin only ever sinks ~0.23 mA; never drive it high (3.3 V into
+    // PROG). For the datasheet check.
+    let chg_fast = c.net("CHG_FAST_N");
+    r(&mut c, "R19", "4.3k", prog, chg_fast, chg);
     // capacitor values INFERRED (the usual 1 µF in / 10 µF at the cell; the research did not
     // read the datasheet's application circuit). 1 µF keeps VBUS + VSYS near USB's 10 µF inrush limit.
     cap(&mut c, "C1", "1u", vbus, gnd, chg);
@@ -159,6 +171,8 @@ pub fn build() -> Circuit {
     c.connect(chrg, d1, &["K"]);
     // The LED pulls CHRG toward VBUS when not charging, above the GPIO's 3.6 V rating: 100k in
     // series limits that to a few µA into the pin's clamp (firmware research §7).
+    // Firmware: never an internal pull-up on this pin (with R5 in series a low would read as
+    // ~2.4 V; datasheet check 2026-09-30). The LED path is its pull-up.
     r(&mut c, "R5", "100k", chrg, chrg_sense, chg);
     let stdby = c.net("STDBY_N");
     c.connect(stdby, u2, &["5"]);
@@ -178,12 +192,15 @@ pub fn build() -> Circuit {
     c.connect(vbus, q1, &["G"]);
     c.connect(vsys, q1, &["S"]);
     c.connect(vbat, q1, &["D"]);
-    r(&mut c, "R6", "100k", vbus, gnd, path); // gate pull-down; keep <= 100k (Schottky leakage)
-    // RB160M-30 Schottky, SOD-123, pad 1 = cathode
+    // Gate pull-down. 10k, not 100k (datasheet check, 2026-09-30): D2's reverse leakage into
+    // 100k could lift VBUS enough when warm to half turn Q1 off and fake a USB detect.
+    r(&mut c, "R6", "10k", vbus, gnd, path);
+    // RB168MM-40 Schottky (<= 0.55 µA at 40 V), SOD-123FL, pad 1 = cathode
+    // (research/2026-09-30-power-path-fix.md: the RB160M-30 leaked ~6 µA, over the sleep budget)
     let d2 = c
-        .part("D2", "Device:D_Schottky", "RB160M-30", "Diode_SMD:D_SOD-123")
-        .lcsc("C7502715")
-        .mpn("RB160M-30")
+        .part("D2", "Device:D_Schottky", "RB168MM-40", "Diode_SMD:D_SOD-123F")
+        .lcsc("C509936")
+        .mpn("RB168MM-40TR")
         .block(path)
         .id();
     c.connect(vbus, d2, &["A"]);
@@ -220,21 +237,23 @@ pub fn build() -> Circuit {
     cap(&mut c, "C9", "100n", bat_adc, gnd, path);
 
     // --- 3.3 V regulator -----------------------------------------------------------
-    // RT9080-33GJ5 (TSOT-23-5): 1 VIN, 2 GND, 3 EN, 4 NC, 5 VOUT (parts research §4, DS p.2).
-    // KiCad has no RT9080 symbol; XC6220B331MR has the same pin numbers (its CE = EN).
+    // HE9073A33M5R (SOT-23-5): 1 VIN, 2 GND, 3 CE, 4 NC, 5 VOUT; input abs. max 9 V, above the
+    // TVS's 9.2 V clamp less D2's drop (research/2026-09-30-power-path-fix.md). Pin numbers
+    // INFERRED from the datasheet's dot and standard SOT-23-5 numbering (no numbers in its figure).
+    // KiCad has no HE9073 symbol; XC6220B331MR has the same pin numbers.
     let reg = "3.3 V regulator";
     let u4 = c
-        .part("U4", "Regulator_Linear:XC6220B331MR", "RT9080-33GJ5", "Package_TO_SOT_SMD:TSOT-23-5")
-        .lcsc("C841192")
-        .mpn("RT9080-33GJ5")
+        .part("U4", "Regulator_Linear:XC6220B331MR", "HE9073A33M5R", "Package_TO_SOT_SMD:SOT-23-5")
+        .lcsc("C723789")
+        .mpn("HE9073A33M5R")
         .block(reg)
         .id();
     c.connect(vsys, u4, &["1"]);
     c.connect(gnd, u4, &["2"]);
     c.connect(vsys, u4, &["3"]); // always enabled: the board sleeps instead of switching off
     c.connect(v3, u4, &["5"]);
-    cap(&mut c, "C3", "10u", vsys, gnd, reg); // >= 1 µF at the input (DS p.11)
-    cap(&mut c, "C4", "1u", v3, gnd, reg); // >= 1 µF effective at the output; the 22 µF is at the module
+    cap(&mut c, "C3", "10u", vsys, gnd, reg); // 10 µF at the input (HE9073 DS p.8)
+    cap(&mut c, "C4", "10u", v3, gnd, reg); // HE9073 asks for 10 µF at the output
 
     // --- ESP32-S3 module -----------------------------------------------------------
     let mcu = "ESP32-S3";
@@ -285,8 +304,9 @@ pub fn build() -> Circuit {
     c.connect(bat_adc, u1, &["IO1"]);
     c.connect(vbus_sense, u1, &["IO2"]);
     c.connect(chrg_sense, u1, &["IO4"]);
-    // STDBY straight to its pin. Firmware: pull-ups on IO4/IO5 only while VBUS_SENSE is high,
-    // off before sleep (they can leak into the unpowered charger; firmware research §7).
+    // STDBY straight to its pin. Firmware: an internal pull-up on IO5 only while VBUS_SENSE is
+    // high, off before sleep (it can leak into the unpowered charger; firmware research §7).
+    // IO4 (CHRG) gets no pull-up at all.
     c.connect(stdby, u1, &["IO5"]);
 
     // --- Microphone ------------------------------------------------------------------
@@ -342,9 +362,9 @@ pub fn build() -> Circuit {
     let (tx, rx) = (c.net("UART_TX"), c.net("UART_RX"));
     c.connect(tx, u1, &["TXD0"]);
     c.connect(rx, u1, &["RXD0"]);
-    let (spare1, spare2) = (c.net("SPARE_IO7"), c.net("SPARE_IO21"));
-    c.connect(spare1, u1, &["IO7"]);
-    c.connect(spare2, u1, &["IO21"]);
+    c.connect(chg_fast, u1, &["IO7"]);
+    let spare = c.net("SPARE_IO21");
+    c.connect(spare, u1, &["IO21"]);
 
     let used = [
         "GND", "3V3", "EN", "IO0", "IO1", "IO2", "IO4", "IO5", "IO6", "IO7", "IO8", "IO9", "IO10", "IO11", "IO12", "IO13", "IO21",
@@ -355,13 +375,15 @@ pub fn build() -> Circuit {
     unused.dedup();
     c.nc(u1, &unused.iter().map(String::as_str).collect::<Vec<_>>());
 
-    for (i, net) in [vbus, vsys, vbat, v3, gnd, tx, rx, spare1, spare2].into_iter().enumerate() {
+    for (i, net) in [vbus, vsys, vbat, v3, gnd, tx, rx, spare].into_iter().enumerate() {
         let name = c.net_name(net).to_string();
         let tp = c.part(&format!("TP{}", i + 1), "Connector:TestPoint", &name, TP).block("Test points").not_in_bom().id();
         c.connect(net, tp, &["1"]);
     }
     for i in 1..=2 {
-        c.part(&format!("H{i}"), "Mechanical:MountingHole", "M2", "MountingHole:MountingHole_2.2mm_M2")
+        // Ø2.5 hole for an M2 screw: its courtyard (r 2.75) holds the case's boss (r 2.7: M2
+        // clearance hole 2.4 + 2 x 1.5 mm wall); the 2.2 mm footprint's (r 2.45) does not.
+        c.part(&format!("H{i}"), "Mechanical:MountingHole", "M2", "MountingHole:MountingHole_2.5mm")
             .block("Mounting holes")
             .not_in_bom();
     }

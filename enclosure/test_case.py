@@ -72,8 +72,34 @@ def battery_on_a_standoff(bj, board):
     return {"battery.case"}
 
 
+def _bottom_port(bj, dx):
+    """A tray-side opening under one of the USB-C's locating-peg holes (Ø0.65, unplated)."""
+    j1 = next(f for f in bj["footprints"] if f["ref"] == "J1")
+    bj["case"]["openings"] = [o for o in bj["case"]["openings"] if o["ref"] != "J1"]
+    bj["case"]["openings"].append({"ref": "J1", "kind": "pinhole", "diameter": 1.4, "side": "bottom",
+                                   "at": [j1["x"] + 2.89 + dx, j1["y"] - 2.6], "pcb_hole": 0.65})
+
+
+def bottom_port_fits(bj, board):
+    _bottom_port(bj, 0.0)
+    return set()
+
+
+def bottom_port_off_the_hole(bj, board):
+    _bottom_port(bj, 1.0)  # 1 mm beside the hole: solid PCB above the chimney
+    return {"opening.J1"}
+
+
+def bottom_port_chimney_short(bj, board):
+    _bottom_port(bj, 0.0)
+    case.CHIMNEY_TOP = -0.5  # the chimney stops 0.5 mm under the PCB: sound leaks into the case
+    return {"seal.J1"}
+
+
 CASES = [battery_fits, battery_too_thick, battery_on_a_standoff] if "--battery" in sys.argv else \
-    [lid_too_low, led_opening_shifted, connector_cutout_shifted, part_missing_from_step, battery_fits, battery_too_thick, battery_on_a_standoff]
+    [bottom_port_fits, bottom_port_off_the_hole, bottom_port_chimney_short] if "--bottom" in sys.argv else \
+    [lid_too_low, led_opening_shifted, connector_cutout_shifted, part_missing_from_step, battery_fits, battery_too_thick, battery_on_a_standoff,
+     bottom_port_fits, bottom_port_off_the_hole, bottom_port_chimney_short]
 
 
 def main():
@@ -95,7 +121,10 @@ def main():
         board = case.Board(list(board0.substrate), {r: list(s) for r, s in board0.parts.items()})
         want = fn(bj, board)
         t = time.time()
-        fit = case.run(bj, board, out=None, render_pngs=False)
+        try:
+            fit = case.run(bj, board, out=None, render_pngs=False)
+        finally:
+            case.CHIMNEY_TOP = 0.0
         got = failing(fit)
         ok = (not fit["ok"] and want <= got) if want else (fit["ok"] or print("   ", fit["problems"]))
         print(f"{'ok  ' if ok else 'FAIL'} {fn.__name__}: wants {', '.join(sorted(want))} failing; failing: {', '.join(sorted(got)) or 'none'} ({time.time() - t:.0f} s)")

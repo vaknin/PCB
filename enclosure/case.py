@@ -20,7 +20,12 @@ case.limits, which pcbgen fills from the material):
 - openings, from board.json footprint data: usb_c / connector (wall cutout around the mouth,
   straddling the split so the lid drops on; usb_c adds an outer recess for the plug's overmold),
   button (lid hole + a separate printed cap with a flange and a stem), pinhole (hole + guide
-  tube), led (window pocket or hole), vent (slots).
+  tube; with side = "bottom" a hole in the tray's floor under the part's hole through the PCB,
+  inside a chimney that rises to the PCB's underside as a seal land, plus a shallow groove on
+  the floor's outer face to the nearest side so the hole isn't shut when the case lies on a
+  table), led (window pocket or hole), vent (slots).
+- the shell follows board.json's shell_outline when it has one (the convex hull of a notched
+  outline: a notch is a lead's way past the board and stays open).
 - battery (optional): a fence rib on the tray floor around the cell (pad per side), open up to
   10 mm on the side facing its lead's connector; the cell lies on the floor under the board.
 
@@ -35,7 +40,9 @@ The fit gate (fit.json; the STEP solids are the independent check of the footpri
   plus its swelling room keeps min_clearance from the board's parts and underside (battery.board);
 - each opening against the part's solids: a connector's projection onto its wall sits inside
   the cutout with >= 0.2 mm to spare; a button, pinhole, LED or vent is centred within 0.2 mm of
-  its part; a cap pressed by its switch's travel touches only the actuator;
+  its part; a cap pressed by its switch's travel touches only the actuator; a tray-side opening's
+  axis passes through the hole in board.step's PCB body within 0.2 mm of its centre, under its
+  part, and its chimney reaches the PCB (seal.<ref>);
 - printability from the parameters: walls, floor, boss walls, holes, thinnest skin and part size
   against the material's limits; the screw: a standard length that engages 2 × d in the boss.
 
@@ -82,6 +89,8 @@ CAP_STEM = (1.5, 1.0)  # button cap stem: diameter, length (mm)
 CAP_ABOVE_LID = 1.0  # mm the cap stands above the lid at rest
 CAP_FLANGE_EXTRA = 1.0  # mm per side wider than its hole, so it can't fall out
 PIN_TUBE_GAP = 0.5  # mm from the pinhole's guide tube to the switch top
+SEAL_GAP_MAX = 0.05  # mm: a tray-side opening's chimney must reach the PCB's underside
+CHIMNEY_TOP = 0.0  # z of a tray-side chimney's top: the PCB's underside (test_case.py lowers it)
 SCREW_LENGTHS = [3, 4, 5, 6, 8, 10, 12, 14, 16, 20]  # standard self-tapping screw lengths, mm
 SCREW_ENGAGE_D = 2.0  # thread engagement in the boss, × d (INFERRED: common guidance for plastics)
 
@@ -234,7 +243,7 @@ def build(bj, board, problems):
     c = bj["case"]
     lim = c["limits"]
     T = bj["thickness"]
-    outline = [P(x, y) for x, y in bj["outline"]]
+    outline = [P(x, y) for x, y in bj.get("shell_outline") or bj["outline"]]
     (bx0, by0), (bx1, by1) = bj["bbox"]["min"], bj["bbox"]["max"]
     gap, wall, floor = c["edge_gap"], c["wall"], c["floor"]
     fps = {f["ref"]: f for f in bj["footprints"]}
@@ -350,6 +359,28 @@ def build(bj, board, problems):
             lid_cut.append(cyl(hole, z_lu - 1, z_lt + 1, cx, cy))
             cap_info[ref] = {"travel": o["travel"], "rest": rest, "z_top": z_top, "switch_top": top}
             info["hole_sizes"].append((f"{ref} cap hole", hole))
+        elif kind == "pinhole" and o.get("side") == "bottom":
+            # under the part's hole through the PCB: a bore through the floor inside a chimney
+            # that stands up to the PCB's underside (the seal land around the hole)
+            d = o["diameter"]
+            cx, cy = P(*o["at"])
+            chimney = cyl(d + 2 * lim["wall_min"], zf - 0.5, CHIMNEY_TOP, cx, cy)
+            tray_add.append(chimney)
+            tray_cut.append(cyl(d, zb - 1, 1.0, cx, cy))
+            # a groove on the floor's outer face from the hole to the nearest side, so the hole
+            # stays open when the case lies on its back
+            depth = floor - lim["skin_min"]
+            if depth >= 0.3:
+                x0, x1, y0, y1 = bx0 - gap - wall, bx1 + gap + wall, -by1 - gap - wall, -by0 + gap + wall
+                runs = {"left": cx - x0, "right": x1 - cx, "bottom": cy - y0, "top": y1 - cy}
+                side = min(runs, key=runs.get)
+                g = {"left": (x0 - 1, cx, cy - d / 2, cy + d / 2), "right": (cx, x1 + 1, cy - d / 2, cy + d / 2),
+                     "bottom": (cx - d / 2, cx + d / 2, y0 - 1, cy), "top": (cx - d / 2, cx + d / 2, cy, y1 + 1)}[side]
+                tray_cut.append(box(*g, zb - 1, zb + depth))
+                info["skins"].append((f"{ref} floor left over the sound groove", floor - depth))
+            rec.update(centre=(cx, cy), side="bottom", pcb_hole=o["pcb_hole"], chimney=chimney)
+            info["tube_walls"].append((f"{ref} chimney", lim["wall_min"]))
+            info["hole_sizes"].append((f"{ref} tray-side hole", d))
         elif kind == "pinhole":
             d = o["diameter"]
             lid_cut.append(cyl(d, (top if top else T) - 1, z_lt + 1, cx, cy))
@@ -573,6 +604,23 @@ def check(bj, board, built, problems):
             if kind == "usb_c":
                 setback = abs(rec["face"] - mouth)
                 ok &= ck.add(f"usb_setback.{ref}", setback, USB_MOUTH_SETBACK_MAX, "<=", "receptacle mouth behind the case's outer face at the plug recess (limit INFERRED)")
+            op_results.append({"ref": ref, "kind": kind, "ok": bool(ok), "detail": detail})
+        elif rec.get("side") == "bottom":
+            # the opening's axis against the hole in the STEP's PCB body, and under its part
+            cx, cy = rec["centre"]
+            r = rec["pcb_hole"] / 2
+            axis = cq.Edge.makeLine(cq.Vector(cx, cy, 0.05), cq.Vector(cx, cy, T - 0.2))
+            inside = any(_inside(s, [cq.Vertex.makeVertex(cx, cy, T / 2)]) for s in board.substrate)
+            d = 0.0 if inside else min(axis.distance(s) for s in board.substrate)
+            off = max(r - d, 0.0) if not inside else max(r, ALIGN_TOL + 0.01)
+            bb = board.bbox(ref)
+            under = bb.xmin <= cx <= bb.xmax and bb.ymin <= cy <= bb.ymax
+            detail = (f"tray side; the opening's axis is {d:.3f} mm from the PCB around its Ø{2 * r:g} hole "
+                      f"({'NO hole in the PCB here' if inside else f'{off:.3f} mm off its centre'}), "
+                      f"{'under' if under else 'NOT under'} {ref}'s 3D body")
+            ok = ck.add(f"opening.{ref}", off if under else max(off, ALIGN_TOL + 0.01), ALIGN_TOL, "<=", detail)
+            seal = min(rec["chimney"].distance(s) for s in board.substrate)
+            ok &= ck.add(f"seal.{ref}", seal, SEAL_GAP_MAX, "<=", "the chimney's top to the PCB's underside (the seal land around the hole)")
             op_results.append({"ref": ref, "kind": kind, "ok": bool(ok), "detail": detail})
         else:
             bb = board.bbox(ref)

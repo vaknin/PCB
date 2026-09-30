@@ -66,7 +66,30 @@ fn layers_table() -> Sexp {
     t
 }
 
-fn outline(items: &mut Vec<Sexp>, board: &str, w: f64, h: f64, r: f64) {
+/// One straight edge from `a` to `b` with its notches: the corner points of the path, in order.
+/// `inward` is the unit vector pointing into the board.
+fn edge_path(a: (f64, f64), b: (f64, f64), inward: (f64, f64), mut notches: Vec<(f64, f64, f64)>) -> Result<Vec<(f64, f64)>> {
+    let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+    let dir = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+    notches.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut path = vec![a];
+    let mut last = 0.0;
+    // (start along the edge from a, end, depth)
+    for (s, e, d) in notches {
+        if s <= last + 1e-6 || e >= len - 1e-6 || e <= s || d <= 0.0 {
+            bail!("a board notch must lie inside its edge's straight part, clear of corners and other notches, with a width and depth over 0");
+        }
+        let on = |t: f64, d: f64| (a.0 + dir.0 * t + inward.0 * d, a.1 + dir.1 * t + inward.1 * d);
+        path.extend([on(s, 0.0), on(s, d), on(e, d), on(e, 0.0)]);
+        last = e;
+    }
+    path.push(b);
+    Ok(path)
+}
+
+fn outline(items: &mut Vec<Sexp>, board: &str, spec: &BoardSpec) -> Result<()> {
+    use crate::layout::Edge;
+    let (w, h, r) = (spec.width, spec.height, spec.corner_radius);
     let stroke = || node!("stroke", node!("width", 0.1), node!("type", Kw("default")));
     let mut n = 0;
     let mut id = || {
@@ -77,10 +100,27 @@ fn outline(items: &mut Vec<Sexp>, board: &str, w: f64, h: f64, r: f64) {
         let (a, b) = (board_pt(a.0, a.1), board_pt(b.0, b.1));
         node!("gr_line", node!("start", a.x, a.y), node!("end", b.x, b.y), stroke(), node!("layer", "Edge.Cuts"), id)
     };
-    items.push(seg((r, 0.0), (w - r, 0.0), id()));
-    items.push(seg((w, r), (w, h - r), id()));
-    items.push(seg((w - r, h), (r, h), id()));
-    items.push(seg((0.0, h - r), (0.0, r), id()));
+    // each edge in the outline's direction (clockwise on screen), with the distance of a notch's
+    // `at` from the edge's start
+    type P = (f64, f64);
+    let edges: [(Edge, P, P, P); 4] = [
+        (Edge::Top, (r, 0.0), (w - r, 0.0), (0.0, 1.0)),
+        (Edge::Right, (w, r), (w, h - r), (-1.0, 0.0)),
+        (Edge::Bottom, (w - r, h), (r, h), (0.0, -1.0)),
+        (Edge::Left, (0.0, h - r), (0.0, r), (1.0, 0.0)),
+    ];
+    for (edge, a, b, inward) in edges {
+        let along = |at: f64| match edge {
+            Edge::Top => at - a.0,
+            Edge::Right => at - a.1,
+            Edge::Bottom => a.0 - at,
+            Edge::Left => a.1 - at,
+        };
+        let notches = spec.notches.iter().filter(|n| n.edge == edge).map(|n| (along(n.at) - n.width / 2.0, along(n.at) + n.width / 2.0, n.depth)).collect();
+        for pair in edge_path(a, b, inward, notches)?.windows(2) {
+            items.push(seg(pair[0], pair[1], id()));
+        }
+    }
     if r > 0.0 {
         let k = r * (1.0 - std::f64::consts::FRAC_1_SQRT_2);
         let arcs = [
@@ -102,6 +142,7 @@ fn outline(items: &mut Vec<Sexp>, board: &str, w: f64, h: f64, r: f64) {
             ));
         }
     }
+    Ok(())
 }
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Sexp {
@@ -291,7 +332,7 @@ pub fn build(project_dir: &Path, name: &str, spec: &BoardSpec, net_tree: &Sexp) 
         bail!("no placement given for: {}", missing.join(", "));
     }
 
-    outline(&mut items, name, spec.width, spec.height, spec.corner_radius);
+    outline(&mut items, name, spec)?;
 
     for ko in &spec.keepouts {
         items.push(node!(
@@ -372,4 +413,22 @@ pub fn build(project_dir: &Path, name: &str, spec: &BoardSpec, net_tree: &Sexp) 
     std::fs::write(&pcb_path, dumps(&pcb) + "\n")?;
     kicad_cli(&["pcb", "upgrade", "--force", &pcb_path.to_string_lossy()])?;
     Ok(pcb_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notched_edge() {
+        // the left edge of a 30 x 60 board with 2 mm corners runs upward; a notch 4 wide, 2 deep at y = 33
+        let p = edge_path((0.0, 58.0), (0.0, 2.0), (1.0, 0.0), vec![(23.0, 27.0, 2.0)]).unwrap();
+        assert_eq!(p, vec![(0.0, 58.0), (0.0, 35.0), (2.0, 35.0), (2.0, 31.0), (0.0, 31.0), (0.0, 2.0)]);
+        // no notch: the edge itself
+        assert_eq!(edge_path((2.0, 0.0), (28.0, 0.0), (0.0, 1.0), vec![]).unwrap(), vec![(2.0, 0.0), (28.0, 0.0)]);
+        // into a corner, overlapping, or empty: refused
+        assert!(edge_path((2.0, 0.0), (28.0, 0.0), (0.0, 1.0), vec![(-1.0, 3.0, 2.0)]).is_err());
+        assert!(edge_path((2.0, 0.0), (28.0, 0.0), (0.0, 1.0), vec![(3.0, 6.0, 2.0), (5.0, 8.0, 2.0)]).is_err());
+        assert!(edge_path((2.0, 0.0), (28.0, 0.0), (0.0, 1.0), vec![(3.0, 6.0, 0.0)]).is_err());
+    }
 }

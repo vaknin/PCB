@@ -89,11 +89,33 @@ pub fn silk(text: &str, x: f64, y: f64, size: f64) -> Text {
     Text { text: text.into(), x, y, size, layer: "F.SilkS".into(), rot: 0.0 }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+/// A rectangular notch cut into one straight edge of the board (e.g. where a battery's lead
+/// passes from under the board to a connector on top). `at` is its centre along the edge (x for
+/// Top/Bottom, y for Left/Right), `width` its size along the edge, `depth` how far it goes in.
+/// Drawn with square inner corners; the fab's router rounds them (about 0.5 mm radius).
+#[derive(Clone, Copy, Debug)]
+pub struct Notch {
+    pub edge: Edge,
+    pub at: f64,
+    pub width: f64,
+    pub depth: f64,
+}
+
 #[derive(Clone, Debug)]
 pub struct BoardSpec {
     pub width: f64,
     pub height: f64,
     pub corner_radius: f64,
+    /// Notches in the outline's straight edges, clear of the rounded corners and of each other.
+    pub notches: Vec<Notch>,
     /// Reference → placement, for every part with a footprint.
     pub places: Vec<(String, Place)>,
     pub keepouts: Vec<Keepout>,
@@ -112,6 +134,7 @@ impl BoardSpec {
             width,
             height,
             corner_radius: 1.0,
+            notches: vec![],
             places: vec![],
             keepouts: vec![],
             zones: vec![],

@@ -269,6 +269,18 @@ pub enum LedStyle {
     Hole,
 }
 
+/// Which half of the case an opening is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CaseSide {
+    /// The lid, over the part (the default).
+    Top,
+    /// The tray's floor, under the board: for a part whose port is a hole through the PCB (a
+    /// bottom-port microphone). The hole sits under the footprint's one unplated hole, with a
+    /// chimney from the floor up to the PCB's underside around it.
+    Bottom,
+}
+
 /// `[[case.opening]]`: what the case must let through for one part. Only `ref` and `kind` are
 /// needed; the rest override the kind's defaults (`Opening::resolved`).
 #[derive(Debug, Clone, Deserialize)]
@@ -287,6 +299,9 @@ pub struct Opening {
     pub diameter: Option<f64>,
     /// led: window (default) or hole.
     pub style: Option<LedStyle>,
+    /// pinhole: top (default, a lid hole with a guide tube) or bottom (a floor hole with a
+    /// chimney up to the part's hole through the PCB).
+    pub side: Option<CaseSide>,
     /// button: the switch's travel (0.25, INFERRED: typical for small tactile switches).
     pub travel: Option<f64>,
     /// vent: number of slots (3), their width (1.2) and length (5.0).
@@ -309,6 +324,9 @@ pub struct ResolvedOpening {
     pub diameter: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style: Option<LedStyle>,
+    /// Only written when it is `bottom`, so a top opening's JSON is as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side: Option<CaseSide>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub travel: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -325,7 +343,7 @@ impl Opening {
         match kind {
             OpeningKind::UsbC | OpeningKind::Connector => &["margin", "height"],
             OpeningKind::Button => &["diameter", "travel"],
-            OpeningKind::Pinhole => &["diameter"],
+            OpeningKind::Pinhole => &["diameter", "side"],
             OpeningKind::Led => &["style", "diameter"],
             OpeningKind::Vent => &["slots", "slot_width", "slot_length"],
         }
@@ -339,6 +357,7 @@ impl Opening {
             ("height", o.height.is_some()),
             ("diameter", o.diameter.is_some()),
             ("style", o.style.is_some()),
+            ("side", o.side.is_some()),
             ("travel", o.travel.is_some()),
             ("slots", o.slots.is_some()),
             ("slot_width", o.slot_width.is_some()),
@@ -371,6 +390,7 @@ impl Opening {
             },
             diameter,
             style,
+            side: self.side.filter(|&s| k == Pinhole && s == CaseSide::Bottom),
             travel: (k == Button).then(|| self.travel.unwrap_or(0.25)),
             slots: (k == Vent).then(|| self.slots.unwrap_or(3)),
             slot_width: (k == Vent).then(|| self.slot_width.unwrap_or(1.2)),
@@ -1548,6 +1568,13 @@ style = "hole"
         bad("kind = \"usb_c\"", "kind = \"usb_c\"\nmargin = 0.1", "margin 0.1 mm is under the static fit 0.2 mm");
         bad("style = \"hole\"", "style = \"hole\"\ndiameter = 0.8", "a 0.8 mm hole is under the smallest printable hole 1 mm (resin)");
         bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"pinhole\"\ndiameter = 0.9", "a 0.9 mm hole");
+        bad("style = \"hole\"", "style = \"hole\"\nside = \"bottom\"", "side is not used by a led opening");
+        // a pinhole may be on the tray side; only then is `side` written to board.json
+        let bottom = base.replace("kind = \"led\"\nstyle = \"hole\"", "kind = \"pinhole\"\nside = \"bottom\"");
+        assert_eq!(run(&bottom, &circuit()), Vec::<String>::new());
+        let r = parse(&bottom).unwrap().case.unwrap().resolved();
+        assert_eq!(r["openings"][1]["side"], "bottom");
+        assert!(parse(&base).unwrap().case.unwrap().resolved()["openings"][1].get("side").is_none());
         bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"vent\"\nslots = 0", "slots must be at least 1");
         bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"vent\"\nslot_width = 0.5", "a 0.5 mm hole");
         bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"button\"\ntravel = 0", "travel must be more than 0");

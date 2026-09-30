@@ -76,6 +76,11 @@
     ],
     "sha256": "b3cb3fba00bceb0102b7c73520bed7e919c3e6dbdf3ac73a6917ceac33e6653c"
   },
+  "Diode_SMD.3dshapes/D_SOD-123.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Diode_SMD.3dshapes/D_SOD-123.step",
+    "sha256": "b3dc4065573abc72e3d5b4cca0e908f72a24205a41b6284b1f75ccacbe99adf8"
+  },
   "Diode_SMD.3dshapes/D_SOD-123F.step": {
     "source": "KiCad kicad-packages3D tag 10.0.6",
     "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Diode_SMD.3dshapes/D_SOD-123F.step",
@@ -91,15 +96,40 @@
     "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/LED_SMD.3dshapes/LED_0805_2012Metric.step",
     "sha256": "0aa8b791804f5d72a2fc7d1bf231dd9959207d83df8ad801176fbc459f575b98"
   },
+  "LED_SMD.3dshapes/LED_LiteOn_LTST-C19HE1WT.step": {
+    "source": "drawn by enclosure/models.py: a box from the datasheet",
+    "box": [
+      1.6,
+      1.6,
+      0.35
+    ],
+    "why": "Lite-On LTST-C19HE1WT datasheet p.1: 1.6 x 1.6 mm, 'Extra Thin (0.35Hmm)' (read 2026-09-30); KiCad ships none and EasyEDA's is -0.11..0.25 mm",
+    "sha256": "746997a95131af942f251252b073d6eca9cea6d5c9262d38d6fcb97e8b0ad20c"
+  },
   "Package_TO_SOT_SMD.3dshapes/SOT-223.step": {
     "source": "KiCad kicad-packages3D tag 10.0.6",
     "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Package_TO_SOT_SMD.3dshapes/SOT-223.step",
     "sha256": "77ad6dbacc493cb619c728f26d2ddcf461eb0feb6b977b47d01d51e67016f654"
   },
+  "Package_TO_SOT_SMD.3dshapes/SOT-23-5.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Package_TO_SOT_SMD.3dshapes/SOT-23-5.step",
+    "sha256": "720a6eab0024069bbee68e7cb4c3ff1149468a34611225cdc852662c5d0ec2b7"
+  },
+  "Package_TO_SOT_SMD.3dshapes/SOT-23-6.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Package_TO_SOT_SMD.3dshapes/SOT-23-6.step",
+    "sha256": "c9fe686b4d1b56927a41fa84a9bc1efb61d8a45a123a3db43bcaa05c2891d635"
+  },
   "Package_TO_SOT_SMD.3dshapes/SOT-23.step": {
     "source": "KiCad kicad-packages3D tag 10.0.6",
     "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Package_TO_SOT_SMD.3dshapes/SOT-23.step",
     "sha256": "dd5d1711204e1d8d26cd11490923bd84340820baa69538c385a4300ec2539bc0"
+  },
+  "Package_TO_SOT_SMD.3dshapes/TSOT-23-5.step": {
+    "source": "KiCad kicad-packages3D tag 10.0.6",
+    "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/10.0.6/Package_TO_SOT_SMD.3dshapes/TSOT-23-5.step",
+    "sha256": "5120f0cee43ef7743cc08408d2c12f234fcac7355386e330a3a16f336e23da8d"
   },
   "RF_Module.3dshapes/ESP32-S3-WROOM-1.step": {
     "source": "KiCad kicad-packages3D tag 10.0.6",

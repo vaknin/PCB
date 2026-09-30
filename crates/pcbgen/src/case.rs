@@ -48,6 +48,10 @@ pub fn run(bf: &BoardFile, pcb: &Path, base: &Path) -> Result<bool> {
     let board = Board::from_sexp(&tree)?;
     let thick = tree.find("general").and_then(|g| g.find("thickness")).map_or(1.6, |t| t.num(1));
     let bj = board_json(&board, thick, &bf.board.name, case);
+    let bad: Vec<&str> = bj["case"]["openings"].as_array().into_iter().flatten().filter_map(|o| o["error"].as_str()).collect();
+    if !bad.is_empty() {
+        bail!("board.toml [case]: {}", bad.join("; "));
+    }
     std::fs::write(out.join("board.json"), serde_json::to_string_pretty(&bj)? + "\n")?;
     println!("case: {} ({} footprints, {} mounting holes)", out.join("board.json").display(), bj["footprints"].as_array().map_or(0, Vec::len), bj["mounting_holes"].as_array().map_or(0, Vec::len));
 
@@ -192,7 +196,33 @@ pub fn board_json(board: &Board, thickness: f64, name: &str, case: &Case) -> Val
     if case_json["battery"].is_object() && case_json["battery"]["at"].is_null() {
         case_json["battery"]["at"] = json!([r4((lo.x + hi.x) / 2.0), r4((lo.y + hi.y) / 2.0)]);
     }
-    json!({
+    // a tray-side opening goes under the part's hole through the PCB: its one unplated hole
+    for o in case_json["openings"].as_array_mut().into_iter().flatten() {
+        if o["side"] != "bottom" {
+            continue;
+        }
+        let reference = o["ref"].as_str().unwrap_or("").to_string();
+        let holes: Vec<(Pt, f64)> = board
+            .footprints
+            .iter()
+            .filter(|f| f.reference == reference)
+            .flat_map(|f| &f.pads)
+            .filter(|p| p.kind == "np_thru_hole")
+            .filter_map(|p| p.drill.map(|d| (p.pos, d.0.max(d.1))))
+            .collect();
+        match holes.as_slice() {
+            [(c, d)] => {
+                o["at"] = pt_json(*c);
+                o["pcb_hole"] = json!(r4(*d));
+            }
+            _ => o["error"] = json!(format!("opening {reference}: side = \"bottom\" needs a part with exactly one unplated hole through the PCB (its port); {reference} has {}", holes.len())),
+        }
+    }
+    // the case's shell follows the board's convex hull: a notch in the outline (a lead's way past
+    // the board) must stay open, not be filled by the wall
+    let hull = crate::geom::convex_hull(&board.outline);
+    let shell = (crate::geom::area(&hull).abs() > crate::geom::area(&board.outline).abs() + 1e-6).then(|| hull.iter().map(|p| pt_json(*p)).collect::<Vec<_>>());
+    let mut j = json!({
         "schema": 1,
         "board": name,
         "units": "mm",
@@ -204,7 +234,11 @@ pub fn board_json(board: &Board, thickness: f64, name: &str, case: &Case) -> Val
         "mounting_holes": holes,
         "footprints": fps,
         "case": case_json,
-    })
+    });
+    if let Some(shell) = shell {
+        j["shell_outline"] = json!(shell);
+    }
+    j
 }
 
 #[cfg(test)]
@@ -253,5 +287,53 @@ mod tests {
         // the HRO USB-C's body (F.Fab) is 8.94 wide, its mouth on the board edge
         assert_eq!(j1["fab"], json!({"min": [120.53, 142.65], "max": [129.47, 149.95]}));
         assert_eq!(j1["side"], "top");
+    }
+
+    #[test]
+    fn tray_side_opening_needs_one_hole_through_the_pcb() {
+        use crate::boardfile::{CaseSide, OpeningKind};
+        let pcb = crate::repo_root().join("boards/starter/kicad/starter.kicad_pcb");
+        let Ok(board) = Board::load(&pcb) else {
+            eprintln!("skipped: no starter board file");
+            return;
+        };
+        let bf = crate::boardfile::load(&crate::repo_root().join("boards/starter")).unwrap().unwrap();
+        let mut case = bf.case.unwrap();
+        // the starter's outline has no notch: the shell follows the outline itself
+        assert!(board_json(&board, 1.6, "starter", &case).get("shell_outline").is_none());
+        // J1 (USB-C) has two unplated peg holes, a resistor none: neither can be a sound port
+        for (reference, n) in [("J1", 2), ("R1", 0)] {
+            let o = case.openings.iter_mut().find(|o| o.kind == OpeningKind::Pinhole || o.reference == "J1").unwrap();
+            (o.reference, o.kind, o.side) = (reference.into(), OpeningKind::Pinhole, Some(CaseSide::Bottom));
+            (o.margin, o.height, o.diameter, o.style, o.travel) = (None, None, None, None, None);
+            let j = board_json(&board, 1.6, "starter", &case);
+            let bad: Vec<&str> = j["case"]["openings"].as_array().unwrap().iter().filter_map(|o| o["error"].as_str()).collect();
+            assert_eq!(bad.len(), 1, "{bad:?}");
+            assert!(bad[0].contains(&format!("{reference} has {n}")), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn tray_side_opening_and_notched_shell() {
+        // capture-clip: a bottom-port microphone and a notch in the right edge
+        let dir = crate::repo_root().join("boards/capture-clip");
+        let Ok(board) = Board::load(&dir.join("kicad/capture-clip.kicad_pcb")) else {
+            eprintln!("skipped: no capture-clip board file");
+            return;
+        };
+        let bf = crate::boardfile::load(&dir).unwrap().unwrap();
+        let j = board_json(&board, 1.6, "capture-clip", bf.case.as_ref().unwrap());
+        let mk1 = j["footprints"].as_array().unwrap().iter().find(|f| f["ref"] == "MK1").unwrap();
+        let o = j["case"]["openings"].as_array().unwrap().iter().find(|o| o["ref"] == "MK1").unwrap();
+        assert!(o.get("error").is_none(), "{o}");
+        assert_eq!((o["side"].as_str(), o["pcb_hole"].as_f64()), (Some("bottom"), Some(0.5)));
+        // the footprint's sound hole is 0.71 mm from its origin (ICS-43434 land pattern)
+        let d = (o["at"][0].as_f64().unwrap() - mk1["x"].as_f64().unwrap()).hypot(o["at"][1].as_f64().unwrap() - mk1["y"].as_f64().unwrap());
+        assert!((d - 0.71).abs() < 1e-3, "{d}");
+        // the shell is the notched outline's convex hull: bigger than the outline, inside its bbox
+        let pts = |v: &Value| v.as_array().unwrap().iter().map(|p| Pt { x: p[0].as_f64().unwrap(), y: p[1].as_f64().unwrap() }).collect::<Vec<_>>();
+        let (shell, outline) = (pts(&j["shell_outline"]), pts(&j["outline"]));
+        let (sa, oa) = (crate::geom::area(&shell).abs(), crate::geom::area(&outline).abs());
+        assert!(sa > oa + 1.0 && sa <= 30.0 * 60.0, "shell {sa}, outline {oa}");
     }
 }
