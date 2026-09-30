@@ -147,6 +147,12 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - The lid of a flat case is short: an M3 self-tapping screw needs ~6 mm of thread (2 × d), which the starter's ~4.6 mm lid can't give; M2 × 8 fits.
   - The EasyEDA model of the LTST-C19HE1WT RGB LED is too thin (−0.11…0.25 mm, research); draw that one from the datasheet when capture-clip needs it.
 - **ESP32-S3 GPIO0 as the wake button:** strapping pins are sampled only at a full chip reset; a deep-sleep wake doesn't sample them, so holding the button at wake doesn't enter download mode (ESP32-S3 TRM, via research/2026-09-29-esp32-firmware.md). With `CONFIG_SPIRAM_MEMTEST` on, 8 MB of PSRAM adds about 2 s to every boot.
+- **OGG/Opus on the ESP32-S3 (verified in QEMU 2026-09-30, `firmware/spikes/codec`, D-025 Phase D.1):**
+  - `espressif/esp_audio_codec` 2.6.2 and `esp_muxer` 1.2.3 build and run on IDF v6.1. The Opus encoder at 16 kHz mono 32 kbps CBR, 20 ms frames takes 640-byte PCM frames and makes 80-byte packets. It allocates ~24 KB, which IDF places in PSRAM. Its task used 23 KB of stack.
+  - The OGG muxer puts each packet in its own page unless `ogg_muxer_config_t.page_cache_size` is set: 35 % overhead at 32 kbps. `4096` gives ~1 s pages and 2 % overhead. With a custom `esp_muxer_file_writer_t`, it wrote once per page and never seeked.
+  - Its Ogg: pre-skip 0, OpusHead input rate 48000, no end-of-stream flag on the last page, and a last granule one packet short (an ffmpeg dts warning). ffmpeg and Gemini (gemini-3.5-flash-lite, one request) both accept the file. A copy cut at any byte decodes up to its last complete page.
+  - QEMU needs the `sim` stage's otadata entry for any app on this flash layout, not only for rollback builds: without it, QEMU crashes (SIGSEGV) as the app starts, even with `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` off.
+  - QEMU timing is not silicon timing (encode real-time factor 0.04 in QEMU).
 
 ## Mistakes to avoid
 - **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
