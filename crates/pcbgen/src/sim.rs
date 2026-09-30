@@ -200,7 +200,14 @@ pub struct Console {
 impl Console {
     /// Boots `image` (a whole 16 MB flash) with the module's octal PSRAM.
     pub fn start(qemu: &Path, image: &Path) -> Result<Console> {
-        let mut child = Command::new(qemu)
+        let mut cmd = Command::new(qemu);
+        // QEMU 9.2.2 sometimes segfaults; preloading `scripts/nodump.c` keeps systemd-coredump
+        // (and the desktop's crash notice) out of it. The exit status is unchanged.
+        match Command::new(crate::repo_root().join("scripts/nodump.sh")).output() {
+            Ok(o) if o.status.success() => drop(cmd.env("LD_PRELOAD", String::from_utf8_lossy(&o.stdout).trim())),
+            _ => eprintln!("sim: scripts/nodump.sh failed; a QEMU crash will show as a desktop crash notice"),
+        }
+        let mut child = cmd
             .args(["-M", "esp32s3", "-m", &format!("{}M", PSRAM_BYTES >> 20)])
             .arg("-drive")
             .arg(format!("file={},if=mtd,format=raw", image.display()))

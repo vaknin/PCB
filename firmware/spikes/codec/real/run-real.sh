@@ -48,12 +48,18 @@ boot() {
 
 scan() {
     flash fast
-    for i in 1 2 3 4 5; do bench scan >>"$out/scan.jsonl"; done    # counts and timings only
+    # Only the count and the timings are kept: no names, addresses, signal strengths or channels.
+    for i in 1 2 3 4 5; do
+        bench -t 60 scan | python -c 'import sys, json
+for line in sys.stdin:
+    d = json.loads(line)
+    print(json.dumps({k: d[k] for k in ("test", "error", "err", "networks", "wifi_start_ms", "scan_ms") if k in d}))' >>"$out/scan.jsonl"
+    done
     bench psram >"$out/psram.json"
 }
 
 finish() {
-    flash fast
+    ./build.sh fast flash-clean >/dev/null; sleep 2; bench -t 10 status >/dev/null
     bench erase
     bench status
 }

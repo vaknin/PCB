@@ -23,7 +23,7 @@ printf '\x01\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff
 
 qemu=$(ls -d "${IDF_TOOLS_PATH:-$HOME/.espressif}"/tools/qemu-xtensa/*/qemu/bin/qemu-system-xtensa | sort | tail -1)
 # -m 8M and the octal flag: HARDWARE_LESSONS (QEMU 9.2.2 with octal PSRAM)
-timeout 600 "$qemu" -M esp32s3 -m 8M -drive file=out/flash.bin,if=mtd,format=raw \
+LD_PRELOAD="$("$(git rev-parse --show-toplevel)/scripts/nodump.sh")" timeout 600 "$qemu" -M esp32s3 -m 8M -drive file=out/flash.bin,if=mtd,format=raw \
     -global driver=ssi_psram,property=is_octal,value=true -nographic -serial mon:stdio </dev/null \
     | tee out/qemu.log | while IFS= read -r l; do
         l=${l%$'\r'}

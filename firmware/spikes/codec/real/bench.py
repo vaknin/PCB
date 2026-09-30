@@ -21,11 +21,15 @@ def open_port(port, wait=15.0):
     while True:
         try:
             if os.path.exists(port):
-                # dsrdtr/rtscts off and DTR/RTS low: opening must not reset the chip
+                # Opening must not reset the chip. Linux raises DTR and RTS on open; pyserial then
+                # drops DTR before RTS, and DTR low + RTS high is what the USB Serial/JTAG bridge
+                # takes as "reset". So: keep DTR high through the open (RTS drops first), then
+                # drop DTR.
                 s = serial.Serial()
                 s.port, s.baudrate, s.timeout = port, 115200, 0.2
-                s.dtr = s.rts = False
+                s.dtr, s.rts = True, False
                 s.open()
+                s.dtr = False
                 return s
         except (serial.SerialException, OSError):
             pass
@@ -99,8 +103,12 @@ def status_after(port, first, n, path, gap):
             out = []
             for _ in range(40):  # the port comes back when USB re-enumerates
                 try:
-                    if command(port, "status", 3, out, quiet=True) and out:
+                    # a `status` sent while the chip is still booting arrives damaged and is
+                    # answered with an error: ask again until the real answer comes
+                    out.clear()
+                    if command(port, "status", 3, out, quiet=True) and out and out[-1].get("test") == "status":
                         break
+                    out.clear()
                 except (serial.SerialException, OSError):
                     pass
                 time.sleep(0.25)
@@ -144,7 +152,7 @@ if __name__ == "__main__":
         matrix(port, int(args[1]), *args[2:])
     elif args and args[0] == "wake":
         ms = args[3] if len(args) > 3 else "3000"
-        status_after(port, f"sleep {ms} none", int(args[1]), args[2], int(ms) / 1000 + 0.5)
+        status_after(port, f"sleep {ms} none", int(args[1]), args[2], int(ms) / 1000 + 1.5)
     elif args and args[0] == "restart":
         status_after(port, "restart", int(args[1]), args[2], 1.0)
     elif not command(port, " ".join(args), timeout):
