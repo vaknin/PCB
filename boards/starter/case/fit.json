@@ -348,6 +348,7 @@
     "count": 4,
     "engagement_mm": 4.0
   },
+  "battery": null,
   "renders": [
     "case-iso.png",
     "case-exploded.png",

@@ -21,6 +21,8 @@ case.limits, which pcbgen fills from the material):
   straddling the split so the lid drops on; usb_c adds an outer recess for the plug's overmold),
   button (lid hole + a separate printed cap with a flange and a stem), pinhole (hole + guide
   tube), led (window pocket or hole), vent (slots).
+- battery (optional): a fence rib on the tray floor around the cell (pad per side), open up to
+  10 mm on the side facing its lead's connector; the cell lies on the floor under the board.
 
 The fit gate (fit.json; the STEP solids are the independent check of the footprint data):
 - interference: each case part (tray, lid, each cap) ∩ board (every part solid and the PCB)
@@ -29,6 +31,8 @@ The fit gate (fit.json; the STEP solids are the independent check of the footpri
   intended contacts are the standoffs and bosses on the PCB itself (not a part), and a pressed
   cap on its own switch's actuator;
 - edge_gap: the PCB's edge to the tray's walls;
+- battery: the cell touches the case only where it lies on the floor (battery.case), and the cell
+  plus its swelling room keeps min_clearance from the board's parts and underside (battery.board);
 - each opening against the part's solids: a connector's projection onto its wall sits inside
   the cutout with >= 0.2 mm to spare; a button, pinhole, LED or vent is centred within 0.2 mm of
   its part; a cap pressed by its switch's travel touches only the actuator;
@@ -43,6 +47,7 @@ fit.json (schema 1):
      "openings": [{"ref": str, "kind": str, "ok": bool, "detail": str}],
      "parts": [{"name": str, "step": file, "stl": file, "volume_mm3": float, "size_mm": [x, y, z]}],
      "screw": {"size": str, "length_mm": float | null, "count": int, "engagement_mm": float | null},
+     "battery": {"size_mm": [l, w, h], "swell_mm": float, "lead_side": str | null} | null,
      "renders": [png files], "files": [every file written], "problems": [str]}
 """
 
@@ -50,6 +55,7 @@ import datetime
 import json
 import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -369,6 +375,44 @@ def build(bj, board, problems):
             info["hole_sizes"].append((f"{ref} vent slots", w))
         openings.append(rec)
 
+    # --- battery pocket: a fence on the floor around the cell, open toward its lead -------
+    bat = c.get("battery")
+    if bat:
+        L, W, H = bat["size"]
+        if bat["rotate"]:
+            L, W = W, L
+        bxc, byc = P(*bat["at"])
+        pad, t, fh = bat["pad"], bat["fence_width"], bat["fence_height"]
+        ix0, ix1, iy0, iy1 = bxc - L / 2 - pad, bxc + L / 2 + pad, byc - W / 2 - pad, byc + W / 2 + pad
+        fence = cut(box(ix0 - t, ix1 + t, iy0 - t, iy1 + t, zf - 0.5, zf + fh), box(ix0, ix1, iy0, iy1, zf - 1, zf + fh + 1))
+        lead_side = None
+        if bat["lead"]:
+            fp = fps.get(bat["lead"])
+            if fp is None:
+                problems.append(f"battery lead {bat['lead']}: no footprint on the board")
+            else:
+                lx, ly = P(fp["x"], fp["y"])
+                # the side of the pocket facing the connector; a gap up to 10 mm wide, centred on it
+                sides = {"left": ix0 - lx, "right": lx - ix1, "bottom": iy0 - ly, "top": ly - iy1}
+                lead_side = max(sides, key=sides.get)
+                if lead_side in ("left", "right"):
+                    g = min(10.0, iy1 - iy0)
+                    gc = min(max(ly, iy0 + g / 2), iy1 - g / 2)
+                    x = ix0 - t / 2 if lead_side == "left" else ix1 + t / 2
+                    fence = cut(fence, box(x - t, x + t, gc - g / 2, gc + g / 2, zf - 1, zf + fh + 1))
+                else:
+                    g = min(10.0, ix1 - ix0)
+                    gc = min(max(lx, ix0 + g / 2), ix1 - g / 2)
+                    y = iy0 - t / 2 if lead_side == "bottom" else iy1 + t / 2
+                    fence = cut(fence, box(gc - g / 2, gc + g / 2, y - t, y + t, zf - 1, zf + fh + 1))
+        tray_add.append(fence)
+        info["battery"] = {
+            "cell": box(bxc - L / 2, bxc + L / 2, byc - W / 2, byc + W / 2, zf, zf + H),
+            "envelope": box(bxc - L / 2, bxc + L / 2, byc - W / 2, byc + W / 2, zf, zf + H + bat["swell"]),
+            "lead_side": lead_side, "swell": bat["swell"], "size": bat["size"],
+        }
+        info["skins"].append(("battery fence", t))
+
     tray = cut(fuse(tray, *tray_add), *tray_cut)
     lid = cut(fuse(lid, *lid_add), *lid_cut)
     for name, shape in [("tray", tray), ("lid", lid)] + [(f"cap-{r}", s) for r, s in caps.items()]:
@@ -479,6 +523,26 @@ def check(bj, board, built, problems):
         ck.add(f"interference.{name}", vol, VOLUME_TOL, "<=", "overlaps " + ", ".join(f"{r} ({v:.2f} mm³)" for r, v in sorted(hits.items())) if hits else "touches nothing it shouldn't")
         clearance.append({"part": name, "min_mm": round(best, 4), "nearest": nearest})
         ck.add(f"clearance.{name}", best, c["min_clearance"], ">=", f"nearest part {nearest}")
+
+    # the battery: the cell only sits on the floor, and with its swelling room it stays clear of
+    # the board (parts and the PCB's underside)
+    bi = info.get("battery")
+    if bi:
+        # lifted 1 mm, so the floor it lies on doesn't count (the side gaps are smaller than that:
+        # the fence, walls and standoffs are vertical, so they stay the same)
+        lifted = bi["cell"].translate(cq.Vector(0, 0, 1.0))
+        case_gap = min(lifted.distance(built["tray"]), bi["cell"].distance(built["lid"]))
+        hit = overlap(lifted, built["tray"]) + overlap(bi["cell"], built["lid"])
+        ck.add("battery.case", case_gap if hit <= VOLUME_TOL else -hit, c["min_clearance"], ">=",
+               f"cell {' × '.join(f'{v:g}' for v in bi['size'])} mm to the case besides the floor it lies on (fence, standoffs, walls)"
+               + (f"; overlaps the case by {hit:.2f} mm³" if hit > VOLUME_TOL else ""))
+        groups = dict(board.parts)
+        groups["PCB"] = board.substrate
+        best, nearest, hits = near_parts(bi["envelope"], groups)
+        ck.add("battery.board", best if not hits else -sum(hits.values()), c["min_clearance"], ">=",
+               f"cell + {bi['swell']:.2f} mm swelling room to the board, nearest {nearest}"
+               + (", overlaps " + ", ".join(sorted(hits)) if hits else ""))
+        clearance.append({"part": "battery", "min_mm": round(best, 4), "nearest": nearest})
 
     # PCB edge to the tray's walls
     edge = min(info["walls"].distance(s) for s in board.substrate)
@@ -594,6 +658,7 @@ COL_LID_SEE = cq.Color(0.93, 0.93, 0.90, 0.35)
 COL_CAP = cq.Color(0.85, 0.45, 0.15, 1.0)
 COL_PCB = cq.Color(0.10, 0.45, 0.25, 1.0)
 COL_PART = cq.Color(0.25, 0.25, 0.28, 1.0)
+COL_BATTERY = cq.Color(0.30, 0.45, 0.75, 1.0)
 
 
 def board_assy(board, dz=0.0):
@@ -614,7 +679,11 @@ def write_outputs(out, built, board, render_pngs):
     files, parts, renders = [], [], []
     named = [("case-bottom", built["tray"]), ("case-lid", built["lid"])] + [(f"cap-{r}", s) for r, s in built["caps"].items()]
     for name, shape in named:
-        cq.exporters.export(cq.Workplane().add(shape), str(out / f"{name}.step"))
+        step = out / f"{name}.step"
+        cq.exporters.export(cq.Workplane().add(shape), str(step))
+        # OCCT stamps the time of writing; keep the day only (like fit.json) so re-runs don't dirty git
+        text = step.read_text()
+        step.write_text(re.sub(r"(FILE_NAME\('[^']*',')[0-9T:-]+'", rf"\g<1>{datetime.date.today().isoformat()}T00:00:00'", text, count=1))
         cq.exporters.export(cq.Workplane().add(shape), str(out / f"{name}.stl"), tolerance=0.01, angularTolerance=0.1)
         bb = shape.BoundingBox()
         parts.append({"name": name, "step": f"{name}.step", "stl": f"{name}.stl", "volume_mm3": round(shape.Volume(), 1),
@@ -627,12 +696,17 @@ def write_outputs(out, built, board, render_pngs):
         a = board_assy(board)
         a.add(built["tray"], name="tray", color=COL_CASE)
         a.add(built["lid"], name="lid", color=COL_LID_SEE)
+        cell = built["info"].get("battery", {}).get("cell")
+        if cell is not None:
+            a.add(cell, name="battery", color=COL_BATTERY)
         for i, cap in enumerate(caps):
             a.add(cap, name=f"cap{i}", color=COL_CAP)
         render(out / "case-iso.png", a, zoom=1.1)
         h = built["info"]["z_lt"] - built["info"]["zb"]
         e = cq.Assembly()
         e.add(built["tray"], name="tray", color=COL_CASE)
+        if cell is not None:
+            e.add(cell, name="battery", color=COL_BATTERY)
         e.add(board_assy(board, dz=h * 0.9), name="board")
         lift = cq.Location(cq.Vector(0, 0, h * 2.2))
         e.add(built["lid"], name="lid", color=COL_CASE, loc=lift)
@@ -670,6 +744,8 @@ def run(bj, board, out=None, render_pngs=True):
         "openings": op_results,
         "parts": parts,
         "screw": {k: s[k] for k in ("size", "length_mm", "count", "engagement_mm")},
+        "battery": ({"size_mm": bi["size"], "swell_mm": bi["swell"], "lead_side": bi["lead_side"]}
+                    if (bi := built["info"].get("battery")) else None),
         "renders": renders,
         "files": files + ["fit.json"],
         "problems": problems,

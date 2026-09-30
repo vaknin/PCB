@@ -12,6 +12,7 @@
 //! [provision]      gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
 //! [case]           material = "resin"; wall = 1.5; screw = "M3"
 //! [[case.opening]] ref = "J1"; kind = "usb_c"
+//! [case.battery]   size = [36, 17, 7.8]; lead = "J3"
 //! ```
 //!
 //! `gate` checks it against the circuit and the board's `spec.md`; `header` turns it into
@@ -86,10 +87,57 @@ pub struct Case {
     pub screw: Screw,
     #[serde(rename = "opening", default)]
     pub openings: Vec<Opening>,
+    /// A single-cell LiPo under the board, in a fenced pocket on the tray's floor.
+    pub battery: Option<Battery>,
+}
+
+/// `[case.battery]`: the cell lies on the tray's floor under the board, in a pocket fenced on
+/// all sides by a low rib, open on the side facing its lead's connector. The fit gate checks the
+/// cell against the case and the cell plus its swelling room against the board's underside
+/// (research/2026-09-29-enclosure-tooling.md §4: ribs on four sides, room to swell, nothing
+/// pressing on it).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Battery {
+    /// Length, width and thickness of the cell (mm), from its datasheet, lead and tape included.
+    pub size: [f64; 3],
+    /// Centre of the cell, in board coordinates (mm); the board's centre if not given.
+    pub at: Option<[f64; 2]>,
+    /// The cell's length runs along the board's y axis instead of x.
+    #[serde(default)]
+    pub rotate: bool,
+    /// Headroom over the cell for swelling (mm); 10 % of its thickness if not given (INFERRED:
+    /// pouch cells swell several % over their life).
+    pub swell: Option<f64>,
+    /// Gap between the cell and its fence, per side (mm).
+    #[serde(default = "d0_5")]
+    pub pad: f64,
+    /// The part the cell's lead plugs into (a JST PH): the fence opens on that side.
+    pub lead: Option<String>,
+}
+
+impl Battery {
+    /// Fence rib height above the floor (mm): up to the cell's mid-height, at most 3 mm
+    /// (INFERRED: enough to stop it sliding, low enough to lift it out).
+    fn fence_height(&self) -> f64 {
+        (self.size[2] / 2.0).min(3.0)
+    }
+
+    fn swell(&self) -> f64 {
+        self.swell.unwrap_or(0.1 * self.size[2])
+    }
+
+    /// Floor to the board's underside the cell needs (mm): thickness + swell + clearance.
+    pub fn needs(&self, min_clearance: f64) -> f64 {
+        self.size[2] + self.swell() + min_clearance
+    }
 }
 
 fn d0_2() -> f64 {
     0.2
+}
+fn d0_5() -> f64 {
+    0.5
 }
 fn d0_3() -> f64 {
     0.3
@@ -343,6 +391,16 @@ impl Case {
             "min_clearance": self.min_clearance,
             "screw": self.screw.holes(),
             "openings": self.openings.iter().map(Opening::resolved).collect::<Vec<_>>(),
+            "battery": self.battery.as_ref().map(|b| serde_json::json!({
+                "size": b.size,
+                "at": b.at,
+                "rotate": b.rotate,
+                "swell": b.swell(),
+                "pad": b.pad,
+                "lead": b.lead,
+                "fence_height": b.fence_height(),
+                "fence_width": self.material.limits().wall_min,
+            })),
         })
     }
 }
@@ -778,6 +836,35 @@ fn case_problems(case: &Case, c: &Circuit) -> Vec<String> {
             p.push(format!("case.{key} = {v} mm is under the minimum {min} mm ({m})"));
         }
     }
+    if let Some(b) = &case.battery {
+        if b.size.iter().any(|v| !(v.is_finite() && *v > 0.0)) {
+            p.push("case.battery: size must be three lengths over 0 (length, width, thickness)".into());
+        }
+        if !num(b.swell()) {
+            p.push("case.battery: swell must be 0 or more".into());
+        }
+        if !num(b.pad) || b.pad < lim.static_fit {
+            p.push(format!("case.battery: pad {} mm is under the static fit {} mm ({m})", b.pad, lim.static_fit));
+        }
+        if b.at.is_some_and(|a| a.iter().any(|v| !v.is_finite())) {
+            p.push("case.battery: at must be two numbers".into());
+        }
+        let need = b.needs(case.min_clearance);
+        if case.bottom_gap < need {
+            p.push(format!(
+                "case.battery: bottom_gap {} mm has no room for the cell ({} thick + {:.2} swell + {} clearance = {need:.2} mm)",
+                case.bottom_gap,
+                b.size[2],
+                b.swell(),
+                case.min_clearance
+            ));
+        }
+        if let Some(l) = &b.lead
+            && c.find_part(l).is_none()
+        {
+            p.push(format!("case.battery: lead {l}: no such part in the circuit"));
+        }
+    }
     let mut seen = HashSet::new();
     for o in &case.openings {
         let at = format!("case.opening {}", o.reference);
@@ -1042,6 +1129,29 @@ style = "hole"
         assert!(parse(&text.replace("wall = 1.5", "wall = 1.5\nwal = 1.5")).is_err());
         assert!(parse(&text.replace("style = \"hole\"", "style = \"hole\"\ncolour = \"red\"")).is_err());
         assert_eq!(parse(&text.replace("wall = 1.5", "wall = 1.5\nscrew = \"M2.5\"")).unwrap().case.unwrap().screw, Screw::M2_5);
+    }
+
+    #[test]
+    fn case_battery() {
+        let base = format!("{SAMPLE}{CASE}").replace("wall = 1.5", "wall = 1.5\nbottom_gap = 9.0");
+        let with = |b: &str| format!("{base}\n[case.battery]\n{b}\n");
+        let ok = with("size = [36, 17, 7.8]\nlead = \"R1\"");
+        assert_eq!(run(&ok, &circuit()), Vec::<String>::new());
+        let r = parse(&ok).unwrap().case.unwrap().resolved();
+        let b = &r["battery"];
+        assert_eq!((b["swell"].as_f64().map(|v| (v * 100.0).round()), b["pad"].as_f64(), b["fence_height"].as_f64()), (Some(78.0), Some(0.5), Some(3.0)));
+        assert_eq!((b["at"].is_null(), b["rotate"].as_bool(), b["fence_width"].as_f64()), (true, Some(false), Some(1.2)));
+        assert!(parse(&format!("{SAMPLE}{CASE}")).unwrap().case.unwrap().resolved()["battery"].is_null());
+        let one = |b: &str, want: &str| {
+            let p = run(&with(b), &circuit());
+            assert!(p.len() == 1 && p[0].contains(want), "{b:?}: want {want:?}, got {p:?}");
+        };
+        one("size = [36, 17, 8.5]", "bottom_gap 9 mm has no room for the cell (8.5 thick + 0.85 swell + 0.2 clearance = 9.55 mm)");
+        one("size = [36, 17, 7.8]\nswell = 0.5\npad = 0.1", "pad 0.1 mm is under the static fit 0.2 mm");
+        one("size = [36, 0, 7.8]", "size must be three lengths over 0");
+        one("size = [36, 17, 7.8]\nlead = \"J9\"", "lead J9: no such part");
+        assert!(parse(&with("size = [36, 17]")).is_err());
+        assert!(parse(&with("size = [36, 17, 7.8]\nfoam = 1")).is_err());
     }
 
     #[test]

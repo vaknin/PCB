@@ -84,6 +84,16 @@ level = 1
 # [[case.opening]]
 # ref = "J1"
 # kind = "usb_c"
+#
+# A single-cell LiPo under the board, lying on the tray floor in a pocket fenced by a low rib,
+# open toward its lead's connector. bottom_gap must hold thickness + swell + min_clearance.
+# [case.battery]
+# size = [36.0, 17.0, 7.8]  # length, width, thickness from the cell's datasheet, mm
+# at = [120.0, 110.0]       # centre, board mm (default: the board's centre)
+# rotate = false            # true: length along y
+# swell = 0.8               # headroom for swelling (default 10 % of thickness, INFERRED)
+# pad = 0.5                 # cell to fence, per side
+# lead = "J3"               # the connector its lead plugs into
 # [[case.opening]]
 # ref = "SW2"
 # kind = "button"

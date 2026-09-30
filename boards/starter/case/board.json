@@ -1299,6 +1299,7 @@
         "slot_width": 1.2,
         "slot_length": 5.0
       }
-    ]
+    ],
+    "battery": null
   }
 }

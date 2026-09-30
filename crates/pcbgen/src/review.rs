@@ -99,6 +99,115 @@ fn firmware_section(path: &Path, risks: &mut Vec<String>) -> String {
     out
 }
 
+/// Plain words for a case opening's kind (board.toml `[[case.opening]] kind`).
+fn opening_label(kind: &str) -> &str {
+    match kind {
+        "usb_c" => "USB-C socket",
+        "connector" => "connector",
+        "button" => "button cap",
+        "pinhole" => "pinhole (paper clip)",
+        "led" => "light window",
+        "vent" => "air vent",
+        "mic" => "microphone hole",
+        _ => kind,
+    }
+}
+
+/// The printed case (`case/fit.json` and its renders, written by the `case` stage, D-025 B.5):
+/// the pictures, the fit check in words, each opening, and the parts to print.
+fn case_section(dir: &Path, pcb: &Path, risks: &mut Vec<String>) -> String {
+    let Some(fit) = read_json(&dir.join("fit.json")) else {
+        risks.push("The case hasn't been designed or fit-checked (the <code>case</code> stage).".into());
+        return "<p>Not run yet.</p>".into();
+    };
+    let ok = fit["ok"] == true;
+    let stale = match (std::fs::metadata(dir.join("fit.json")), std::fs::metadata(pcb)) {
+        (Ok(f), Ok(p)) => p.modified().ok() > f.modified().ok(),
+        _ => false,
+    };
+    if !ok {
+        risks.push("The case fails its fit check (see The case).".into());
+    }
+    if stale {
+        risks.push("The board changed after the case was last checked; re-run <code>case</code>.".into());
+    }
+    for c in fit["checks"].as_array().into_iter().flatten().filter(|c| c["ok"] != true) {
+        risks.push(format!("Case check <code>{}</code> fails: {}", esc(c["name"].as_str().unwrap_or("?")), esc(c["detail"].as_str().unwrap_or(""))));
+    }
+    for p in fit["problems"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        risks.push(format!("Case: {}", esc(p)));
+    }
+
+    let captions = [("case-iso.png", "The case, closed"), ("case-exploded.png", "Opened up, with the board inside"), ("case-top.png", "From above")];
+    let pics: String = fit["renders"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|f| {
+            let what = captions.iter().find(|c| c.0 == f).map_or(f, |c| c.1);
+            match std::fs::read(dir.join(f)) {
+                Ok(png) => format!("<figure><img src=\"data:image/png;base64,{}\" alt=\"{}\"><figcaption>{}</figcaption></figure>", base64(&png), esc(what), esc(what)),
+                Err(_) => format!("<figure class=\"none\"><figcaption>{}: picture missing</figcaption></figure>", esc(what)),
+            }
+        })
+        .collect();
+
+    let checks = fit["checks"].as_array().map_or(&[][..], |a| a);
+    let passed = checks.iter().filter(|c| c["ok"] == true).count();
+    let clear: Vec<String> = fit["clearance"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| format!("{} {:.2} mm (nearest {})", esc(c["part"].as_str().unwrap_or("?")), c["min_mm"].as_f64().unwrap_or(f64::NAN), esc(c["nearest"].as_str().unwrap_or("?"))))
+        .collect();
+    let mut openings = String::new();
+    for o in fit["openings"].as_array().into_iter().flatten() {
+        let _ = writeln!(
+            openings,
+            "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td class=\"muted\">{}</td></tr>",
+            esc(o["ref"].as_str().unwrap_or("?")),
+            esc(opening_label(o["kind"].as_str().unwrap_or("?"))),
+            if o["ok"] == true { chip("ok", "Lines up") } else { chip("bad", "Off") },
+            esc(o["detail"].as_str().unwrap_or(""))
+        );
+    }
+    let mut prints = String::new();
+    for p in fit["parts"].as_array().into_iter().flatten() {
+        let s: Vec<String> = p["size_mm"].as_array().into_iter().flatten().filter_map(Value::as_f64).map(|v| format!("{v:.1}")).collect();
+        let _ = writeln!(
+            prints,
+            "<tr><td>{}</td><td class=\"num\">{} mm</td><td class=\"num\">{:.1} cm³</td></tr>",
+            esc(p["name"].as_str().unwrap_or("?")),
+            s.join(" × "),
+            p["volume_mm3"].as_f64().unwrap_or(0.0) / 1000.0
+        );
+    }
+    let sc = &fit["screw"];
+    let screw = if sc.is_object() {
+        format!(" Closed with {} × {} × {} mm self-tapping screws.", sc["count"], esc(sc["size"].as_str().unwrap_or("?")), sc["length_mm"])
+    } else {
+        String::new()
+    };
+    let state = match (ok, stale) {
+        (false, _) => chip("bad", "Fit check fails"),
+        (true, true) => chip("warn", "Passed, but the board changed since"),
+        (true, false) => chip("ok", "Fits"),
+    };
+    format!(
+        "<p>{state} {passed} of {} checks pass, run {}. Printed in {}.{screw}</p>\n\
+         <p class=\"muted\">The fit check loads the board's 3D model and the case and measures them: nothing overlaps, every part keeps its gap \
+         (smallest: {}), each opening sits over its part, and the button cap reaches its switch.</p>\n\
+         <section class=\"pics\">{pics}</section>\n\
+         <h3>Openings</h3>\n<div class=\"scroll\"><table><thead><tr><th>Part</th><th>Opening</th><th>Fit</th><th>Detail</th></tr></thead><tbody>\n{openings}</tbody></table></div>\n\
+         <h3>Pieces to print</h3>\n<div class=\"scroll\"><table><thead><tr><th>Piece</th><th class=\"num\">Size</th><th class=\"num\">Material used</th></tr></thead><tbody>\n{prints}</tbody></table></div>\n",
+        checks.len(),
+        esc(fit["date"].as_str().unwrap_or("?")),
+        esc(fit["material"].as_str().unwrap_or("?")),
+        clear.join(", "),
+    )
+}
+
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
@@ -459,6 +568,7 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     });
 
     let firmware = firmware_section(&i.base.join("firmware/sim.json"), &mut risks);
+    let case = case_section(&i.base.join("case"), &pcb, &mut risks);
 
     // --- pictures ---------------------------------------------------------------------------
     let top = render(&pcb, "F.Cu,B.Cu,F.Fab,F.Courtyard,F.SilkS,Edge.Cuts", false);
@@ -504,6 +614,7 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     let _ = writeln!(h, "<section class=\"pics\">{}{}</section>", pic(&top, "Top"), pic(&bottom, "Bottom, seen from below"));
     let _ = writeln!(h, "<section><h2>This round</h2>\n{notes}\n{changes}\n</section>");
     let _ = writeln!(h, "<section><h2>Things to check</h2>\n<ul class=\"risks\">\n{risk_list}</ul>\n</section>");
+    let _ = writeln!(h, "<section><h2>The case</h2>\n{case}</section>");
     let _ = write!(
         h,
         "<section><h2>What it must do</h2>\n<p class=\"muted\">From <code>spec.md</code>; each line names what shows it is met.</p>\n\

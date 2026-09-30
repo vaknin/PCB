@@ -187,6 +187,11 @@ pub fn board_json(board: &Board, thickness: f64, name: &str, case: &Case) -> Val
             "fab": box_json(&fp.fab),
         }));
     }
+    let mut case_json = case.resolved();
+    // the battery's default place: the board's centre
+    if case_json["battery"].is_object() && case_json["battery"]["at"].is_null() {
+        case_json["battery"]["at"] = json!([r4((lo.x + hi.x) / 2.0), r4((lo.y + hi.y) / 2.0)]);
+    }
     json!({
         "schema": 1,
         "board": name,
@@ -198,7 +203,7 @@ pub fn board_json(board: &Board, thickness: f64, name: &str, case: &Case) -> Val
         "bbox": {"min": pt_json(lo), "max": pt_json(hi)},
         "mounting_holes": holes,
         "footprints": fps,
-        "case": case.resolved(),
+        "case": case_json,
     })
 }
 

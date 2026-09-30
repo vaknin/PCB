@@ -1,6 +1,6 @@
 # Plan: firmware and enclosure tooling, then capture-clip (D-025, agreed 2026-09-29)
 
-Status: **agreed by the owner, 2026-09-29.** Phase A is built (see D-025). Phase B: the `case` stage is built and passes on the starter (2026-09-30); its review-page section, the Python negative tests and the battery pocket are still to do (D-025 "Phase B still to do"). Work is
+Status: **agreed by the owner, 2026-09-29.** Phase A is built (see D-025). Phase B is built (2026-09-30): the `case` stage, its review-page section, the negative tests and the battery pocket (D-025). Work is
 ordered by dependency, not by date. Each step says what "done" means, so the review pages can
 show progress. Research behind it:
 - `research/2026-09-29-parts-capture-clip.md` (parts)
