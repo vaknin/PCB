@@ -1,0 +1,10 @@
+[package]
+name = "capture-clip"
+version = "0.1.0"
+description = "Capture clip: battery voice-note button for Capture, revision A"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pcbgen = { path = "../../crates/pcbgen" }

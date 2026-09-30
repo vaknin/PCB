@@ -162,7 +162,7 @@ Order matters: the parts most likely to fail go first.
 ## Phase E: capture-clip circuit, layout and case (design rounds)
 1. **Circuit** (`boards/capture-clip`, crate + `board.toml`; drop the `Cargo.toml` exclude). From the
    parts research plus the firmware research:
-   - USB-C with the starter's ESD parts; TP4057 charger at 300 mA (RPROG 3 kΩ), charge LED on VBUS,
+   - USB-C with the starter's ESD parts; TP4057 charger at 100 mA (RPROG 10 kΩ; was 300 mA, over the USB budget, D-025 E.1), charge LED on VBUS,
      CHRG (through ~100 kΩ) and STDBY to GPIOs
    - AO3401A + RB160M-30 power path, 100 kΩ gate pull-down; RT9080-33 LDO; 22 µF + 0.1 µF at the module
    - JST PH, + marked on silk (which pad is + checked against JST's drawing first)

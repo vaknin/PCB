@@ -155,6 +155,11 @@ Full table with URLs: `research/2026-09-29-datasheet-check.md` (checked by a sep
   - QEMU timing is not silicon timing (encode real-time factor 0.04 in QEMU).
 - **ESP-IDF v6.1 has no `json` component** (verified 2026-09-30: nothing matching in `components/`). cJSON would be a managed component; the capture component has its own small reader instead (D-025 Phase D.2).
 - **Java/Kotlin text rules a C port must copy** (verified by the ported Capture tests, 2026-09-30): Kotlin's `trim()` and `isBlank()` use Unicode whitespace (U+00A0, U+2003 and U+3000 are trimmed; INFERRED from the JVM's definition, not a Kotlin run), Java's regex `\s` is ASCII only, and `OffsetDateTime.parse` rejects offsets past ±18:00.
+- **pcbgen/ERC lessons from capture-clip's circuit (2026-09-30):**
+  - A PWR_FLAG on a net driven by a module GPIO gives an ERC `pin_to_pin` warning. Put a series part (0 Ω) between the pin and the supply pin and flag the far side.
+  - `check` can't run before `pcb`: it errors at DRC ("Unable to open ….kicad_pcb") after ERC and writes no `gates.json`. For a schematic-only pass read `erc.json` and the `sch` output.
+  - KiCad's `power` library has `+BATT` and `VBUS` but no `VSYS`; it becomes the local net `/VSYS`, so its net-class pattern needs `*VSYS`.
+  - A charger without input-current limiting counts fully against the USB budget, on top of the board's own peak.
 
 ## Mistakes to avoid
 - **A gate passing on the wrong rules proves nothing.** The committed `2cca03f` board was routed with its net classes missing (every net at 0.2 mm), and nothing flagged it. Cause not found; a fresh `sch pcb route` applies them. The USB class then stayed unapplied too: its patterns (`USB_D+`) never matched KiCad's local-net names (`/USB_D+`). The `netclasses` gate now fails on any pattern that matches no net.
