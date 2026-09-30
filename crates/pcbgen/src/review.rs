@@ -7,6 +7,9 @@
 //! `<name>-draft-*` tag. Missing inputs show as "not run", never as a pass.
 //!
 //! The file is written as an Artifact page body (no <html>/<head>; the publisher wraps it).
+//!
+//! The same run writes the readiness page next to it (`crate::readiness`): what the owner reads
+//! before saying "freeze".
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -21,6 +24,7 @@ use crate::circuit::Circuit;
 use crate::cost;
 use crate::gates::{classify, violations};
 use crate::layout::Waiver;
+use crate::readiness;
 
 pub struct Inputs<'a> {
     /// The board's crate directory (board.toml, spec.md, round.md, git).
@@ -325,7 +329,7 @@ fn case_section(dir: &Path, pcb: &Path, risks: &mut Vec<String>) -> String {
     )
 }
 
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
@@ -433,11 +437,11 @@ fn money(v: &Value) -> String {
     v.as_f64().map_or("?".into(), |x| format!("${x:.2}"))
 }
 
-fn chip(state: &str, text: &str) -> String {
+pub(crate) fn chip(state: &str, text: &str) -> String {
     format!("<span class=\"chip {state}\">{}</span>", esc(text))
 }
 
-/// Builds the page and writes `<base>/review/index.html`.
+/// Builds the page and writes `<base>/review/index.html`, and the readiness page beside it.
 pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     let c = i.circuit;
     let name = &c.name;
@@ -700,6 +704,10 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     let risk_list: String = risks.iter().map(|r| format!("<li>{r}</li>\n")).collect();
     let title = format!("{} review", c.title);
     let date = crate::schematic::today();
+    // the readiness page lists the same automatic findings, so it is written once they are all in
+    let dir = i.base.join("review");
+    let ready = readiness::write(&dir, c, bf, &risks, &date)?;
+    println!("readiness: {} ({})", dir.join(readiness::PAGE).display(), ready.verdict());
 
     let mut h = String::new();
     h += &format!("<title>{}</title>\n", esc(&title));
@@ -707,7 +715,7 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     let _ = write!(
         h,
         "<main>\n<header>\n<p class=\"eyebrow\">{} · revision {} · {}</p>\n<h1>{}</h1>\n<p class=\"meta\">Commit <code>{head}</code>{}, page made {date}</p>\n\
-         <div class=\"chips\">{checks_chip}{}{}{}</div>\n</header>\n",
+         <div class=\"chips\">{checks_chip}{}{}{}{}</div>\n</header>\n",
         esc(name),
         esc(&c.rev),
         esc(&round),
@@ -716,10 +724,12 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
         chip(cost_state, &format!("Cost: {cost_head}")),
         chip(power_state, &format!("Power: {power_head}")),
         chip(if risks.is_empty() { "ok" } else { "warn" }, &format!("{} things to check", risks.len())),
+        ready.summary_chip(),
     );
     let _ = writeln!(h, "<section class=\"pics\">{}{}</section>", pic(&top, "Top"), pic(&bottom, "Bottom, seen from below"));
     let _ = writeln!(h, "<section><h2>This round</h2>\n{notes}\n{changes}\n</section>");
     let _ = writeln!(h, "<section><h2>Things to check</h2>\n<ul class=\"risks\">\n{risk_list}</ul>\n</section>");
+    let _ = writeln!(h, "<section><h2>Readiness</h2>\n{}</section>", ready.section());
     let _ = writeln!(h, "<section><h2>The case</h2>\n{case}</section>");
     let _ = write!(
         h,
@@ -732,8 +742,6 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     let _ = writeln!(h, "<section><h2>Firmware in simulation</h2>\n{firmware}\n</section>");
     let _ = writeln!(h, "<section><h2>Bring-up</h2>\n<p class=\"muted\">The same self-test, on a real board.</p>\n{bringup}</section>\n</main>");
 
-    let dir = i.base.join("review");
-    std::fs::create_dir_all(&dir)?;
     let path = dir.join("index.html");
     std::fs::write(&path, h)?;
     Ok(path)
@@ -774,7 +782,7 @@ fn describe_cover(cov: &str, c: &Circuit, bf: &BoardFile, gate_ok: &dyn Fn(&str)
 }
 
 /// Board-house palette: soldermask-green neutrals, copper accent; pictures on white.
-const STYLE: &str = r#"<link rel="preconnect" href="https://fonts.googleapis.com">
+pub(crate) const STYLE: &str = r#"<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* One column of stacked sections; summary chips first, then pictures, then detail tables. */

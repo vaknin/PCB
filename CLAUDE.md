@@ -17,5 +17,6 @@ Owner is not an EE. Full brief: `docs/brief.md`.
 - Plain language to the owner; no schematics unless asked; no calendar timelines.
 - Log technical decisions in `DECISIONS.md` instead of asking.
 - Choices the owner makes (look, feel, price: case, material, colour, size, features, cost
-  tiers) go on an Artifact choice page with a picture per option, then `AskUserQuestion`;
-  never as plain terminal text. Details: `docs/workflow.md` and the pcb-pipeline skill.
+  tiers) and cost trade-offs (which fab, fee-bearing parts vs fee-free substitutes,
+  cheaper-but-less) go on an Artifact choice page with a picture and price per option, then
+  `AskUserQuestion`; never as plain terminal text and never decided by Claude. Details: `docs/workflow.md` and the pcb-pipeline skill.

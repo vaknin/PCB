@@ -11,7 +11,8 @@
 //! files (`diagram.json`, `wokwi.toml`, the scenario) when a pin has a `sim` part.
 //! `sim` (the firmware in QEMU, plus Wokwi with `--wokwi`; D-025), `case` (the printed case
 //! and its fit check, `<board>/case/`; D-025 Phase B), `cost` (live JLCPCB prices, needs the
-//! network) and `review` (the owner's review page, `<board>/review/index.html`) run only when
+//! network) and `review` (the owner's review page, `<board>/review/index.html`, and the readiness page
+//! `readiness.html` beside it) run only when
 //! named.
 
 use std::path::{Path, PathBuf};

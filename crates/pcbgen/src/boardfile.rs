@@ -16,6 +16,8 @@
 //! [case]           material = "resin"; wall = 1.5; screw = "M3"
 //! [[case.opening]] ref = "J1"; kind = "usb_c"
 //! [case.battery]   size = [36, 17, 7.8]; lead = "J3"
+//! [[requirement.proof]] how = "simulated"; evidence = "QEMU scenario record_upload"
+//! [[risk]]         what = "..."; tag = "INFERRED"; fix = "new_board"; miss = "..."; check = "..."; accepted = "..."
 //! ```
 //!
 //! `gate` checks it against the circuit and the board's `spec.md`; `header` turns it into
@@ -56,6 +58,10 @@ pub struct BoardFile {
     pub provision: BTreeMap<String, Provision>,
     /// The printed case (D-025 Phase B), built and fit-checked by the `case` stage; None: no case.
     pub case: Option<Case>,
+    /// Every guess and unchecked fact the design still rests on, for the readiness page
+    /// (`crate::readiness`, docs/workflow.md "Right the first time").
+    #[serde(rename = "risk", default)]
+    pub risks: Vec<Risk>,
 }
 
 /// `[case]`: a two-part printed shell (bottom tray + lid) around the board, made by
@@ -755,6 +761,75 @@ pub struct Requirement {
     /// What shows the requirement is met: `part:<ref>`, `pin:<signal>`, `test:<self-test>`
     /// or `gate:<gate>` (one of `GATES`).
     pub covered_by: Vec<String>,
+    /// How it was proven before the order (`[[requirement.proof]]`). `covered_by` says what in
+    /// the design is responsible; a proof says what showed that it works. None is not a gate
+    /// failure: the readiness page shows the requirement red, and red blocks freeze.
+    #[serde(rename = "proof", default)]
+    pub proofs: Vec<Proof>,
+}
+
+/// `[[requirement.proof]]`: one thing that showed a requirement is met.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Proof {
+    pub how: How,
+    /// The scenario, datasheet table, measurement or gate that shows it, in plain words (free
+    /// text, not parsed). For `unprovable`: why, and what covers it at bring-up.
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum How {
+    /// The firmware did it in QEMU or Wokwi.
+    Simulated,
+    /// Checked against the part's datasheet by the independent checker.
+    Datasheet,
+    /// Measured on a dev board with plug-in parts.
+    Devboard,
+    /// One of the pipeline's gates (ERC, DRC, the case's fit check, ...).
+    Gate,
+    /// Only the delivered board can show it (radio range, how the microphone sounds).
+    Unprovable,
+}
+
+/// `[[risk]]`: one open guess or unchecked fact, and what being wrong about it would cost. The
+/// readiness page sorts them by `fix`; one that would need a new board blocks freeze until the
+/// owner accepts it by name.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Risk {
+    /// The open item, in plain words.
+    pub what: String,
+    pub tag: Tag,
+    /// What fixing a miss would need.
+    pub fix: Fix,
+    /// What a miss would cost the owner, in plain words.
+    pub miss: String,
+    /// How and when it gets settled.
+    pub check: Option<String>,
+    /// The owner's words accepting it by name; never written by Claude on the owner's behalf.
+    pub accepted: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Tag {
+    /// Read from a source, but not checked against it independently.
+    Unverified,
+    /// Reasoned or estimated; no source says it.
+    Inferred,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Fix {
+    /// Free: an update over USB or Wi-Fi.
+    Firmware,
+    /// A soldering iron on the delivered board (a cut track, a swapped part).
+    Rework,
+    /// A second order and a second shipment.
+    NewBoard,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -929,6 +1004,22 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
                     _ => format!("gates are {}", GATES.join(", ")),
                 };
                 p.push(format!("{at}: {cov:?}: {what}"));
+            }
+        }
+    }
+    // --- readiness: proofs and open risks (empty words would show as blanks on the page) ----
+    for r in &bf.requirements {
+        for (n, proof) in r.proofs.iter().enumerate() {
+            if proof.evidence.trim().is_empty() {
+                p.push(format!("requirement {}: proof {}: evidence is empty", r.id, n + 1));
+            }
+        }
+    }
+    for (n, r) in bf.risks.iter().enumerate() {
+        let blank = |s: &str| s.trim().is_empty();
+        for (key, empty) in [("what", blank(&r.what)), ("miss", blank(&r.miss)), ("accepted", r.accepted.as_deref().is_some_and(blank))] {
+            if empty {
+                p.push(format!("risk {}: {key} is empty", n + 1));
             }
         }
     }
@@ -1580,6 +1671,76 @@ style = "hole"
         bad("kind = \"led\"\nstyle = \"hole\"", "kind = \"button\"\ntravel = 0", "travel must be more than 0");
         // a LED window is a pocket, not a hole: a small one is fine
         assert_eq!(run(&base.replace("style = \"hole\"", "diameter = 0.8"), &circuit()), Vec::<String>::new());
+    }
+
+    /// Appended to SAMPLE: the proofs land on its last `[[requirement]]` (R1).
+    const READINESS: &str = r#"
+[[requirement.proof]]
+how = "simulated"
+evidence = "QEMU self-test sensor"
+
+[[requirement.proof]]
+how = "unprovable"
+evidence = "Accuracy in real air; measured at bring-up"
+
+[[risk]]
+what = "The antenna keep-out is big enough"
+tag = "INFERRED"
+fix = "new_board"
+miss = "Short Wi-Fi range; a second board"
+check = "Blind review of the layout"
+accepted = "OK, I accept the antenna risk"
+
+[[risk]]
+what = "LED resistor value"
+tag = "UNVERIFIED"
+fix = "rework"
+miss = "A dim light; one resistor swapped"
+"#;
+
+    #[test]
+    fn proofs_and_risks() {
+        // all optional: a board.toml without them parses as before
+        let bf = parse(SAMPLE).unwrap();
+        assert!(bf.risks.is_empty() && bf.requirements[0].proofs.is_empty());
+        let text = SAMPLE.replace("[firmware]\nself_test = [\"sensor\"]\n", "") + READINESS + "\n[firmware]\nself_test = [\"sensor\"]\n";
+        assert_eq!(run(&text, &circuit()), Vec::<String>::new());
+        let bf = parse(&text).unwrap();
+        let proofs = &bf.requirements[0].proofs;
+        assert_eq!((proofs.len(), proofs[0].how, proofs[1].how), (2, How::Simulated, How::Unprovable));
+        assert_eq!(proofs[0].evidence, "QEMU self-test sensor");
+        let r = &bf.risks;
+        assert_eq!((r.len(), r[0].tag, r[0].fix, r[1].tag, r[1].fix), (2, Tag::Inferred, Fix::NewBoard, Tag::Unverified, Fix::Rework));
+        assert_eq!((r[0].check.as_deref(), r[0].accepted.as_deref(), r[1].check.as_deref(), r[1].accepted.as_deref()), (Some("Blind review of the layout"), Some("OK, I accept the antenna risk"), None, None));
+        for how in ["datasheet", "devboard", "gate"] {
+            assert!(parse(&text.replace("how = \"simulated\"", &format!("how = \"{how}\""))).is_ok(), "{how}");
+        }
+        assert!(parse(&text.replace("fix = \"rework\"", "fix = \"firmware\"")).is_ok());
+        // unknown words and keys don't parse; a risk needs what, tag, fix and miss
+        for (from, to) in [
+            ("how = \"simulated\"", "how = \"tested\""),
+            ("fix = \"rework\"", "fix = \"respin\""),
+            ("fix = \"new_board\"", "fix = \"new board\""),
+            ("tag = \"INFERRED\"", "tag = \"inferred\""),
+            ("tag = \"UNVERIFIED\"", "tag = \"GUESS\""),
+            ("how = \"simulated\"", "how = \"simulated\"\nby = \"QEMU\""),
+            ("fix = \"rework\"", "fix = \"rework\"\ncost = 3"),
+            ("miss = \"A dim light; one resistor swapped\"\n", ""),
+            ("evidence = \"QEMU self-test sensor\"\n", ""),
+        ] {
+            assert!(text.contains(from), "{from:?} not in the sample");
+            assert!(parse(&text.replacen(from, to, 1)).is_err(), "{from:?} -> {to:?} parsed");
+        }
+        // empty words are gate problems
+        let bad = |from: &str, to: &str, want: &str| {
+            assert!(text.contains(from), "{from:?} not in the sample");
+            let p = run(&text.replacen(from, to, 1), &circuit());
+            assert!(p.len() == 1 && p[0] == want, "{from:?} -> {to:?}: want {want:?}, got {p:?}");
+        };
+        bad("evidence = \"Accuracy in real air; measured at bring-up\"", "evidence = \" \"", "requirement R1: proof 2: evidence is empty");
+        bad("what = \"LED resistor value\"", "what = \"\"", "risk 2: what is empty");
+        bad("miss = \"Short Wi-Fi range; a second board\"", "miss = \"\"", "risk 1: miss is empty");
+        bad("accepted = \"OK, I accept the antenna risk\"", "accepted = \"  \"", "risk 1: accepted is empty");
     }
 
     #[test]

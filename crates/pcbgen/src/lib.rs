@@ -17,6 +17,7 @@ pub mod geom;
 pub mod layout;
 pub mod pcb;
 pub mod project;
+pub mod readiness;
 pub mod report;
 pub mod review;
 pub mod route;

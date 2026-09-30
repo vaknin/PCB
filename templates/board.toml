@@ -78,6 +78,47 @@ id = "R1"
 text = "Shows that it is running with a status light"
 covered_by = ["part:D2", "pin:STATUS_LED", "test:status_led"]
 
+# How the requirement was proven before the order, for the readiness page (the `review` stage
+# writes review/readiness.html; docs/workflow.md "Right the first time"). Any number per
+# requirement; they belong to the [[requirement]] above them.
+#   how:      simulated | datasheet | devboard | gate | unprovable
+#   evidence: the scenario, datasheet table, measurement or gate that shows it, in plain words;
+#             for unprovable: why, and what covers it at bring-up
+# A requirement with no proof is red on the page and blocks freeze (not a gate failure); one
+# with only `unprovable` proofs is amber.
+# [[requirement.proof]]
+# how = "simulated"
+# evidence = "Wokwi run: STATUS_LED goes high after boot (sim.json, status_led)"
+#
+# [[requirement.proof]]
+# how = "unprovable"
+# evidence = "How bright it looks through the case; looked at on the first board (devctl selftest)"
+
+# One [[risk]] per guess or unchecked fact the design still rests on (every UNVERIFIED or
+# INFERRED item). The readiness page groups them by `fix`, most expensive first.
+#   what:     the open item, plain words
+#   tag:      "UNVERIFIED" | "INFERRED"
+#   fix:      what fixing a miss would need: firmware | rework | new_board
+#   miss:     what a miss would cost the owner, plain words
+#   check:    optional: how and when it gets settled
+#   accepted: optional: the owner's own words accepting it by name
+# fix = "new_board" without `accepted` is red and blocks freeze (scripts/freeze.sh reads
+# review/readiness.json); with `accepted`, or fix = "rework", it is amber.
+# [[risk]]
+# what = "The status LED's resistor gives a visible but not glaring light"
+# tag = "INFERRED"
+# fix = "rework"
+# miss = "A light that is too dim or too bright; one resistor swapped by hand"
+# check = "Looked at on the first board"
+#
+# [[risk]]
+# what = "The microphone's pinout matches the footprint"
+# tag = "UNVERIFIED"
+# fix = "new_board"
+# miss = "No sound at all; a second order and shipment"
+# check = "Independent datasheet check before freeze"
+# accepted = "I accept the microphone pinout risk"
+
 [firmware]
 # Self-tests the firmware runs at bring-up and reports over USB; each must cover a requirement.
 self_test = ["status_led"]
@@ -119,6 +160,18 @@ level = 1
 # [[case.opening]]
 # ref = "J1"
 # kind = "usb_c"
+#
+# A pinhole can instead go through the tray's floor, for a part whose port is a hole through the
+# PCB (a bottom-port microphone): side = "bottom" ("top", the lid, is the default; pinhole only).
+# The part's footprint must have exactly one unplated hole; the opening goes under it, inside a
+# chimney from the floor up to the PCB's underside, with a groove to the nearest side so the hole
+# stays open when the case lies on a table. Fit checks: opening.<ref> (on the PCB hole's axis,
+# under the part) and seal.<ref> (the chimney reaches the PCB).
+# [[case.opening]]
+# ref = "MK1"
+# kind = "pinhole"
+# side = "bottom"
+# diameter = 1.4
 #
 # A single-cell LiPo under the board, lying on the tray floor in a pocket fenced by a low rib,
 # open toward its lead's connector. bottom_gap must hold thickness + swell + min_clearance.
