@@ -208,9 +208,14 @@ net = "SDA"
 gpio = 1
 dir = "io"
 
-[power]
-source = "USB"
-budget_ma = 500
+[[power.source]]
+name = "usb"
+what = "USB"
+
+[[power.source.limit]]
+name = "USB 2.0"
+ma = 500
+source = "spec"
 
 [[sim.wokwi_step]]
 wait = "SELFTEST_LOOK led on"

@@ -6,6 +6,8 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
 - Claude asks questions and proposes 2–3 different ways to build the idea, with rough cost and effort for each. No part numbers, no schematics.
 - The phase ends only when the owner says so. Its output is the spec.
 
+**Choices the owner makes** (at any step): what the owner sees, holds or pays for (the case's material, colour and finish, the board's colour, size against battery life, features, cost tiers) is shown on an Artifact choice page, with a picture, the price difference and the trade-offs of each option and Claude's recommendation first, then asked as a one-click question. Technical choices stay Claude's (DECISIONS.md). Details: the pcb-pipeline skill, "Choices the owner makes".
+
 ## 2. Spec: `boards/<name>/spec.md` + `board.toml`
 - **`spec.md`** is plain Markdown on a fixed template (`templates/spec.md`):
   - purpose; where it lives
@@ -16,11 +18,11 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
   - Each requirement has an ID (R1, R2, …).
 - **`board.toml`** (`templates/board.toml`) holds the facts that must never disagree:
   - the pin map (signal → module pin)
-  - the power budget
+  - the power budget: one per power source (USB, battery), and for a battery board what it draws asleep
   - each requirement ID and what covers it (a part, a pin, a firmware self-test or a gate)
   - the firmware's self-tests, and optionally the order quantities and the budget
 - **Both sides read `board.toml`.** The BOARD.TOML gate checks it against the circuit, and the `fw` stage writes the firmware's pin header (`firmware/board_pins.h`) from it.
-- **The gate fails if they drift** (runs in `sch`, `check` and `fw`): a requirement nothing covers or missing from `spec.md`, a pin on a different net or GPIO than the circuit, a GPIO the circuit uses that the map lacks, loads over the power budget. Full list: D-023.
+- **The gate fails if they drift** (runs in `sch`, `check` and `fw`): a requirement nothing covers or missing from `spec.md`, a pin on a different net or GPIO than the circuit, a GPIO the circuit uses that the map lacks, loads over a source's budget, a sleep total over its budget. Full list: D-023, D-025 (Phase C).
 
 ## 3. Firmware in simulation
 - ESP-IDF (D-009), in `boards/<name>/firmware/` (the `fw` stage copies `templates/firmware` there once), using the shared components in `firmware/components/` and the generated `board_pins.h`.
@@ -34,18 +36,21 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
 - **Each round:**
   - change the circuit or layout
   - run the full pipeline with every gate
+  - run the firmware in simulation (`sim`)
+  - from the first layout on, design and fit-check the case (`case`: the board's 3D model against the printed case, plus pictures). The case is part of the design from then on, not a later phase (D-025).
   - render the board and estimate the cost (`cost` stage: live JLCPCB prices)
   - the independent reviewer agent checks it
   - write `boards/<name>/round.md` (`templates/round.md`): what changed and why, open risks, questions for the owner
 - **Each round ends in a review page for the owner** (plain language, no schematics):
-  - a picture of the board
+  - a picture of the board, and of the case with its fit check
   - what changed and why
   - the parts and cost against budget
+  - the power budget per source, and the sleep total next to the battery-life requirement
   - the firmware in simulation
-  - open risks
+  - open risks, including a secret that expires soon (`board.toml [provision]` `expires`)
 - **The page:** `cargo run --release -p <board> -- review` writes `boards/<name>/review/index.html` (gitignored). Publish it as an Artifact for the owner, updating the same one each round.
 - Rounds are git tags `<board>-draft-<n>` (`scripts/draft.sh <board>`, on a clean tree), so any two can be compared; the page lists the commits since the previous one.
-- It repeats until the owner says **"freeze"**: `scripts/freeze.sh <board>` tags `<board>-rev<X>-freeze` on the reviewed draft. That locks the spec for this revision.
+- It repeats until the owner says **"freeze"**: `scripts/freeze.sh <board>` tags `<board>-rev<X>-freeze` on the reviewed draft. That locks the spec for this revision, and the case with it (`case/` is in the board directory, so `check-frozen.sh` covers it).
 
 ## 5. Order
 - On the frozen version (`scripts/check-frozen.sh <board>` passes: the tag exists and nothing in the board directory changed since):
@@ -54,11 +59,11 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
   - the reviewer
   - rotations checked in JLCPCB's preview
   - the fab's own manufacturability check
-- Then a cost summary and the owner's OK.
+- Then a cost summary and the owner's OK. It covers the boards and the case together: the case's STL/STEP files (`case/`) go to JLC3DP in the same order summary.
 - Ordered as its own order in a combined parcel (D-021): 5 bare boards, 2 assembled.
 
 ## 6. Bring-up and the next revision
-- The owner plugs the board in. Claude flashes it, runs the self-test, and records what's wrong in `boards/<name>/errata-rev<X>.md` (`templates/errata.md`).
+- The owner plugs the board in. Claude flashes it, runs the self-test (`devctl selftest`, saved in `bringup/` and shown on the review page), and records what's wrong in `boards/<name>/errata-rev<X>.md` (`templates/errata.md`).
 - Rev A is the prototype, so it is built for rework:
   - spare pins on test pads
   - 0 Ω jumpers where a guess could be wrong

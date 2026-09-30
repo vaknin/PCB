@@ -1,6 +1,6 @@
 # Plan: firmware and enclosure tooling, then capture-clip (D-025, agreed 2026-09-29)
 
-Status: **agreed by the owner, 2026-09-29.** Phase A is built (see D-025). Phase B is built (2026-09-30): the `case` stage, its review-page section, the negative tests and the battery pocket (D-025). Work is
+Status: **agreed by the owner, 2026-09-29.** Phase A is built (see D-025). Phase B is built (2026-09-30): the `case` stage, its review-page section, the negative tests and the battery pocket (D-025). Phase C is built (2026-09-30): the case in every round, per-source and sleep power budgets, bring-up results and secret expiry on the review page (D-025). Next: Phase D.1, the codec test. Work is
 ordered by dependency, not by date. Each step says what "done" means, so the review pages can
 show progress. Research behind it:
 - `research/2026-09-29-parts-capture-clip.md` (parts)

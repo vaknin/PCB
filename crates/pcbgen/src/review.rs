@@ -65,20 +65,7 @@ fn firmware_section(path: &Path, risks: &mut Vec<String>) -> String {
         }
         let ok = r["ok"] == true;
         let date = r["date"].as_str().or(sim["date"].as_str()).unwrap_or("?");
-        let mut rows = String::new();
-        for t in r["tests"].as_array().into_iter().flatten() {
-            let (state, word) = match t["result"].as_str().unwrap_or("?") {
-                "pass" => ("ok", "Pass"),
-                "skip" => ("warn", "Skipped"),
-                _ => ("bad", "Fail"),
-            };
-            rows += &format!(
-                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>\n",
-                esc(t["test"].as_str().unwrap_or("?")),
-                chip(state, word),
-                esc(t["detail"].as_str().unwrap_or(""))
-            );
-        }
+        let rows = test_rows(r);
         let problems: Vec<String> = r["problems"].as_array().into_iter().flatten().filter_map(|p| p.as_str()).map(|p| format!("<li>{}</li>", esc(p))).collect();
         let name = if key == "qemu" { "QEMU" } else { "Wokwi" };
         if !ok {
@@ -98,6 +85,136 @@ fn firmware_section(path: &Path, risks: &mut Vec<String>) -> String {
     }
     out
 }
+
+/// One table row per self-test in a `SELFTEST` report (sim.json's runs, devctl's bring-up files).
+fn test_rows(r: &Value) -> String {
+    let mut rows = String::new();
+    for t in r["tests"].as_array().into_iter().flatten() {
+        let (state, word) = match t["result"].as_str().unwrap_or("?") {
+            "pass" => ("ok", "Pass"),
+            "skip" => ("warn", "Skipped"),
+            _ => ("bad", "Fail"),
+        };
+        rows += &format!(
+            "<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>\n",
+            esc(t["test"].as_str().unwrap_or("?")),
+            chip(state, word),
+            esc(t["detail"].as_str().unwrap_or(""))
+        );
+    }
+    rows
+}
+
+/// The newest real-board self-test (`bringup/selftest-<date>.json`, written by `devctl selftest`):
+/// "not run yet" until a board exists.
+fn bringup_section(dir: &Path, risks: &mut Vec<String>) -> String {
+    let newest = std::fs::read_dir(dir.join("bringup"))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.starts_with("selftest-") && n.ends_with(".json"))
+        .max();
+    let Some(r) = newest.as_ref().and_then(|n| read_json(&dir.join("bringup").join(n))) else {
+        return "<p class=\"muted\">Not run yet: this runs once a built board is plugged in (<code>devctl selftest</code>).</p>".into();
+    };
+    let ok = r["ok"] == true;
+    if !ok {
+        risks.push("The built board fails its self-test (see Bring-up).".into());
+    }
+    let mut notes: Vec<String> = r["problems"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|p| format!("<li>{}</li>", esc(p))).collect();
+    for l in r["needs_person"].as_array().into_iter().flatten() {
+        notes.push(format!(
+            "<li>Needs a look: <code>{}</code> should show {}.</li>",
+            esc(l["test"].as_str().unwrap_or("?")),
+            esc(l["look"].as_str().unwrap_or("?"))
+        ));
+    }
+    format!(
+        "<p>{} Run {} on <code>{}</code>.</p>\n{}<div class=\"scroll\"><table><thead><tr><th>Test</th><th>Result</th><th>Detail</th></tr></thead><tbody>\n{}</tbody></table></div>\n",
+        chip(if ok { "ok" } else { "bad" }, if ok { "Pass" } else { "Fail" }),
+        esc(r["date"].as_str().unwrap_or("?")),
+        esc(r["port"].as_str().unwrap_or("?")),
+        if notes.is_empty() { String::new() } else { format!("<ul class=\"risks\">{}</ul>\n", notes.join("")) },
+        test_rows(&r)
+    )
+}
+
+/// The power budgets from `board.toml [power]` (D-025 C.2): a table per source, and what the
+/// board draws asleep. Returns the section, the summary chip's text and its state.
+fn power_section(bf: &BoardFile, risks: &mut Vec<String>) -> (String, String, &'static str) {
+    let guess = |src: &str| if src.contains("INFERRED") { chip("warn", "estimate") + " " } else { String::new() };
+    let (mut out, mut heads, mut state) = (String::new(), vec![], "ok");
+    let mut guesses = 0;
+    for t in bf.power.tally() {
+        let s = t.source;
+        let mut rows = String::new();
+        for l in &t.loads {
+            let _ = writeln!(rows, "<tr><td>{}</td><td class=\"num\">{}</td><td class=\"muted\">{}{}</td></tr>", esc(&l.name), l.ma, guess(&l.source), esc(&l.source));
+        }
+        let limits: Vec<String> = s.limits.iter().map(|l| format!("{} {} mA <span class=\"muted\">({})</span>", esc(&l.name), l.ma, esc(&l.source))).collect();
+        guesses += t.loads.iter().filter(|l| l.source.contains("INFERRED")).count() + s.limits.iter().filter(|l| l.source.contains("INFERRED")).count();
+        let spare = t.budget_ma - t.ma;
+        let _ = writeln!(
+            rows,
+            "<tr class=\"sum\"><td>Total, worst case</td><td class=\"num\">{:.1}</td><td>of {} mA: {}</td></tr>",
+            t.ma,
+            t.budget_ma,
+            if t.over() { format!("{:.1} mA over", -spare) } else { format!("{spare:.1} mA to spare") }
+        );
+        if t.over() {
+            state = "bad";
+            risks.push(format!("Power from {}: {:.1} mA drawn, over its {} mA budget.", esc(&s.name), t.ma, t.budget_ma));
+        }
+        let mut head = format!("{} {:.0} of {} mA", s.name, t.ma, t.budget_ma);
+        let _ = write!(
+            out,
+            "<h3>From {} {}</h3>\n<p class=\"muted\">Limited by: {}. The budget is the smallest.</p>\n\
+             <div class=\"scroll\"><table><thead><tr><th>Load</th><th class=\"num\">mA</th><th>Source</th></tr></thead><tbody>\n{rows}</tbody></table></div>\n",
+            esc(&s.what),
+            chip(if t.over() { "bad" } else { "ok" }, if t.over() { "Over budget" } else { "Fits" }),
+            limits.join("; ")
+        );
+        if let Some(b) = s.sleep_ua {
+            let mut rows = String::new();
+            for l in &t.sleep_loads {
+                let _ = writeln!(rows, "<tr><td>{}</td><td class=\"num\">{}</td><td class=\"muted\">{}{}</td></tr>", esc(&l.name), l.ua, guess(&l.source), esc(&l.source));
+            }
+            let est = t.sleep_loads.iter().filter(|l| l.source.contains("INFERRED")).count();
+            guesses += est;
+            let _ = writeln!(rows, "<tr class=\"sum\"><td>Total asleep</td><td class=\"num\">{:.1}</td><td>of {b} µA</td></tr>", t.sleep_ua);
+            if t.sleep_over() {
+                state = "bad";
+                risks.push(format!("Asleep on {}: {:.1} µA, over the {b} µA budget: the battery won't last as long as the spec says.", esc(&s.name), t.sleep_ua));
+            }
+            let _ = write!(
+                out,
+                "<h4>Asleep on {} {}</h4>\n<p class=\"muted\">Everything that still draws current while the board sleeps; this sets how long the battery lasts.{}</p>\n\
+                 <div class=\"scroll\"><table><thead><tr><th>Part</th><th class=\"num\">µA</th><th>Source</th></tr></thead><tbody>\n{rows}</tbody></table></div>\n",
+                esc(&s.name),
+                sleep_chip(&t),
+                if est > 0 { format!(" {est} of these figures are estimates; the real number is measured on the first board.") } else { String::new() }
+            );
+            head += &format!(", asleep {:.1} of {b} µA", t.sleep_ua);
+        }
+        heads.push(head);
+    }
+    if guesses > 0 {
+        risks.push(format!("{guesses} of the power figures are estimates, not datasheet values."));
+    }
+    (out, heads.join("; "), state)
+}
+
+/// The sleep total against its budget, as a chip: amber while any figure is an estimate.
+fn sleep_chip(t: &crate::boardfile::Tally) -> String {
+    let b = t.source.sleep_ua.unwrap_or(f64::NAN);
+    let estimated = t.sleep_loads.iter().any(|l| l.source.contains("INFERRED"));
+    let state = if t.sleep_over() { "bad" } else if estimated { "warn" } else { "ok" };
+    chip(state, &format!("Asleep: {:.1} of {b} µA{}", t.sleep_ua, if estimated { ", estimated" } else { "" }))
+}
+
+/// Days before a secret's expiry that the page starts warning (renewing means re-provisioning
+/// every device that shares it).
+const EXPIRY_WARN_DAYS: i64 = 60;
 
 /// Plain words for a case opening's kind (board.toml `[[case.opening]] kind`).
 fn opening_label(kind: &str) -> &str {
@@ -511,36 +628,24 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
         risks.push("No fab files yet (run the <code>fab</code> stage).".into());
     }
 
-    // --- board.toml: requirements and power ----------------------------------------------
-    let (mut reqs, mut power, mut power_head) = (String::new(), String::new(), "no board.toml".to_string());
+    // --- board.toml: requirements, power and secrets ----------------------------------------
+    let (mut reqs, mut power, mut power_head, mut power_state) = (String::new(), String::new(), "no board.toml".to_string(), "warn");
     if let Some(bf) = bf {
         for r in &bf.requirements {
             let covers: Vec<String> = r.covered_by.iter().map(|cov| describe_cover(cov, c, bf, &gate_ok, stale)).collect();
             let _ = writeln!(reqs, "<tr><td class=\"rid\">{}</td><td>{}</td><td>{}</td></tr>", esc(&r.id), esc(&r.text), covers.join(" "));
         }
-        let total: f64 = bf.power.loads.iter().map(|l| l.ma).sum();
-        power_head = format!("{total:.0} of {:.0} mA", bf.power.budget_ma);
-        for l in &bf.power.loads {
-            let guess = l.source.contains("INFERRED");
-            let _ = writeln!(
-                power,
-                "<tr><td>{}</td><td class=\"num\">{}</td><td class=\"muted\">{}{}</td></tr>",
-                esc(&l.name),
-                l.ma,
-                if guess { chip("warn", "estimate") + " " } else { String::new() },
-                esc(&l.source)
-            );
-        }
-        let _ = writeln!(
-            power,
-            "<tr class=\"sum\"><td>Total, worst case</td><td class=\"num\">{total:.1}</td><td>of {} mA from {}: {:.1} mA to spare</td></tr>",
-            bf.power.budget_ma,
-            esc(&bf.power.source),
-            bf.power.budget_ma - total
-        );
-        let guesses = bf.power.loads.iter().filter(|l| l.source.contains("INFERRED")).count();
-        if guesses > 0 {
-            risks.push(format!("{guesses} of the power figures are estimates, not datasheet values."));
+        (power, power_head, power_state) = power_section(bf, &mut risks);
+        for (key, date, days) in crate::boardfile::expiries(bf, &crate::schematic::today()) {
+            if days < 0 {
+                risks.push(format!("The secret <code>{}</code> expired on {}: renew it, then load it again with <code>devctl provision</code>.", esc(&key), esc(&date)));
+            } else if days <= EXPIRY_WARN_DAYS {
+                risks.push(format!(
+                    "The secret <code>{}</code> expires on {} (in {days} days): renew it, then load it again with <code>devctl provision</code>.",
+                    esc(&key),
+                    esc(&date)
+                ));
+            }
         }
     }
 
@@ -569,6 +674,7 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
 
     let firmware = firmware_section(&i.base.join("firmware/sim.json"), &mut risks);
     let case = case_section(&i.base.join("case"), &pcb, &mut risks);
+    let bringup = bringup_section(i.dir, &mut risks);
 
     // --- pictures ---------------------------------------------------------------------------
     let top = render(&pcb, "F.Cu,B.Cu,F.Fab,F.Courtyard,F.SilkS,Edge.Cuts", false);
@@ -608,7 +714,7 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
         esc(&c.title),
         if dirty { " with uncommitted changes" } else { "" },
         chip(cost_state, &format!("Cost: {cost_head}")),
-        chip("ok", &format!("Power: {power_head}")),
+        chip(power_state, &format!("Power: {power_head}")),
         chip(if risks.is_empty() { "ok" } else { "warn" }, &format!("{} things to check", risks.len())),
     );
     let _ = writeln!(h, "<section class=\"pics\">{}{}</section>", pic(&top, "Top"), pic(&bottom, "Bottom, seen from below"));
@@ -621,9 +727,10 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
          <div class=\"scroll\"><table><thead><tr><th>ID</th><th>Requirement</th><th>Covered by</th></tr></thead><tbody>\n{reqs}</tbody></table></div>\n</section>\n"
     );
     let _ = writeln!(h, "<section><h2>Cost</h2>\n{cost_body}\n<div class=\"scroll\"><table class=\"parts\"><thead><tr><th>Part</th><th>On the board</th><th>LCSC</th><th>Library</th><th class=\"num\">JLCPCB stock</th><th class=\"num\">Each</th><th class=\"num\">Line</th></tr></thead><tbody>\n{parts}</tbody></table></div>\n</section>");
-    let _ = writeln!(h, "<section><h2>Power budget</h2>\n<div class=\"scroll\"><table><thead><tr><th>Load</th><th class=\"num\">mA</th><th>Source</th></tr></thead><tbody>\n{power}</tbody></table></div>\n</section>");
+    let _ = writeln!(h, "<section><h2>Power budget</h2>\n{power}</section>");
     let _ = writeln!(h, "<section><h2>Checks</h2>\n<div class=\"scroll\"><table><tbody>\n{checks}</tbody></table></div>\n</section>");
-    let _ = writeln!(h, "<section><h2>Firmware in simulation</h2>\n{firmware}\n</section>\n</main>");
+    let _ = writeln!(h, "<section><h2>Firmware in simulation</h2>\n{firmware}\n</section>");
+    let _ = writeln!(h, "<section><h2>Bring-up</h2>\n<p class=\"muted\">The same self-test, on a real board.</p>\n{bringup}</section>\n</main>");
 
     let dir = i.base.join("review");
     std::fs::create_dir_all(&dir)?;
@@ -645,6 +752,15 @@ fn describe_cover(cov: &str, c: &Circuit, bf: &BoardFile, gate_ok: &dyn Fn(&str)
             format!("<span class=\"cov\">{}<span class=\"muted\">{g}</span></span>", esc(x))
         }
         "test" => format!("<span class=\"cov\">self-test <span class=\"muted\">{}</span></span>", esc(x)),
+        "power" | "sleep" => {
+            let tally = bf.power.tally();
+            let Some(t) = tally.iter().find(|t| t.source.name == x) else { return esc(cov) };
+            if kind == "sleep" {
+                sleep_chip(t)
+            } else {
+                chip(if t.over() { "bad" } else { "ok" }, &format!("Power from {x}: {:.0} of {} mA", t.ma, t.budget_ma))
+            }
+        }
         "gate" => {
             let state = match gate_ok(x) {
                 Some(true) if !stale => "ok",
@@ -750,4 +866,81 @@ mod tests {
         let r = "# x\n## Rotation corrections applied\n- J1: a\n## Rotation UNVERIFIED (no known)\n\n- D1 (LED)\n- U1 (ESP)\n## Other\n- no\n";
         assert_eq!(readme_list(r, "## Rotation UNVERIFIED"), vec!["D1 (LED)", "U1 (ESP)"]);
     }
+
+    const BATTERY_BOARD: &str = r#"
+[board]
+name = "t"
+revision = "A"
+module = "U1"
+
+[[power.source]]
+name = "usb"
+what = "USB-C"
+[[power.source.limit]]
+name = "USB 2.0"
+ma = 500
+source = "spec"
+
+[[power.source]]
+name = "battery"
+what = "LiPo"
+sleep_ua = 20
+[[power.source.limit]]
+name = "LDO"
+ma = 600
+source = "datasheet"
+
+[[power.load]]
+name = "module"
+ma = 355
+source = "datasheet"
+
+[[power.sleep_load]]
+name = "module asleep"
+ua = 8
+source = "VERIFIED: datasheet"
+
+[[power.sleep_load]]
+name = "LDO"
+ua = 4
+source = "INFERRED"
+"#;
+
+    #[test]
+    fn power_section_per_source_and_asleep() {
+        let bf = crate::boardfile::parse(BATTERY_BOARD).unwrap();
+        let mut risks = vec![];
+        let (html, head, state) = power_section(&bf, &mut risks);
+        assert_eq!((head.as_str(), state), ("usb 355 of 500 mA; battery 355 of 600 mA, asleep 12.0 of 20 µA", "ok"));
+        assert!(html.contains("<h3>From USB-C") && html.contains("<h3>From LiPo") && html.contains("<h4>Asleep on battery"), "{html}");
+        assert!(html.contains("Asleep: 12.0 of 20 µA, estimated"), "{html}");
+        assert_eq!(risks, vec!["1 of the power figures are estimates, not datasheet values."]);
+        // over the sleep budget: a red chip and a risk
+        let bf = crate::boardfile::parse(&BATTERY_BOARD.replace("ua = 8", "ua = 18")).unwrap();
+        let mut risks = vec![];
+        let (html, _, state) = power_section(&bf, &mut risks);
+        assert_eq!(state, "bad");
+        assert!(html.contains("chip bad\">Asleep: 22.0 of 20 µA"), "{html}");
+        assert!(risks.iter().any(|r| r.contains("Asleep on battery: 22.0 µA, over the 20 µA budget")), "{risks:?}");
+    }
+
+    #[test]
+    fn bringup_reads_the_newest_selftest() {
+        let dir = std::env::temp_dir().join(format!("pcbgen-bringup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut risks = vec![];
+        assert!(bringup_section(&dir, &mut risks).contains("Not run yet"));
+        assert!(risks.is_empty());
+        std::fs::create_dir_all(dir.join("bringup")).unwrap();
+        let report = |ok: bool, result: &str| {
+            format!(r#"{{"ok": {ok}, "date": "d", "port": "/dev/ttyACM0", "tests": [{{"test": "mic", "result": "{result}", "detail": "rms 0"}}], "needs_person": [{{"test": "rgb", "look": "red"}}], "problems": []}}"#)
+        };
+        std::fs::write(dir.join("bringup/selftest-2027-01-01.json"), report(true, "pass")).unwrap();
+        std::fs::write(dir.join("bringup/selftest-2027-01-02.json"), report(false, "fail")).unwrap();
+        let html = bringup_section(&dir, &mut risks);
+        assert!(html.contains("chip bad\">Fail") && html.contains("<code>mic</code>") && html.contains("should show red"), "{html}");
+        assert_eq!(risks, vec!["The built board fails its self-test (see Bring-up)."]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
 }

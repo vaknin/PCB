@@ -73,11 +73,19 @@ gpio = 20
 dir = "io"
 note = "native USB (flashing and serial console)"
 
-[power]
-source = "USB-C 5 V (5.1k CC pull-downs: default USB power, no PD)"
-budget_ma = 500
-# 500 mA is USB 2.0's default current; that every port and charger gives at least this
-# is INFERRED. The fuse (F1) holds 0.61 A at 50 C (HARDWARE_LESSONS).
+[[power.source]]
+name = "usb"
+what = "USB-C 5 V (5.1k CC pull-downs: default USB power, no PD)"
+
+[[power.source.limit]]
+name = "USB 2.0 default current"
+ma = 500
+source = "USB 2.0; that every port and charger gives at least this is INFERRED"
+
+[[power.source.limit]]
+name = "Fuse F1 hold current at 50 C"
+ma = 610
+source = "Bourns MF-NSMF075-2 derating table (HARDWARE_LESSONS.md)"
 
 [[power.load]]
 name = "ESP32-S3 module, Wi-Fi transmit peak"
@@ -117,7 +125,7 @@ source = "INFERRED: a chosen limit, not a measured load"
 [[requirement]]
 id = "R1"
 text = "Runs from any USB-C charger or computer port (5 V, no USB-PD)"
-covered_by = ["part:J1", "part:R1", "part:R2", "part:U2", "gate:board_toml"]
+covered_by = ["part:J1", "part:R1", "part:R2", "part:U2", "power:usb", "gate:board_toml"]
 
 [[requirement]]
 id = "R2"

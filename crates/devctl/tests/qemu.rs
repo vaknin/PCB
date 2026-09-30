@@ -47,7 +47,7 @@ fn provision_in_qemu() {
     let (ssid, token) = ("Q7 home=net", "tok-Z9x4-devctl-secret");
     std::fs::write(&file, format!("# test\nwifi_ssid=old\nwifi_ssid=  {ssid}  \napi_token={token}\n")).unwrap();
     for key in ["wifi_ssid", "api_token"] {
-        bf.provision.insert(key.into(), format!("file:{}#{key}", file.display()));
+        bf.provision.insert(key.into(), format!("file:{}#{key}", file.display()).into());
     }
     let mut s = Session::new(QemuLink::open(&dir).unwrap());
     let sent = provision::run(&bf, &mut s, "qemu");

@@ -28,9 +28,14 @@ pub fn run<L: Link>(bf: &BoardFile, s: &mut Session<L>, target: &str) -> Result<
     if bf.provision.is_empty() {
         return Ok(vec![]);
     }
+    for (key, date, days) in pcbgen::boardfile::expiries(bf, &pcbgen::schematic::today()) {
+        if days < 0 {
+            println!("   warning: {key} expired on {date} (board.toml); renew it before relying on the board");
+        }
+    }
     let mut values: Vec<(&str, Secret)> = vec![];
     for (key, reference) in &bf.provision {
-        values.push((key, resolve(key, reference)?));
+        values.push((key, resolve(key, reference.reference())?));
     }
 
     let (_, problems) = crate::boot(bf, s, target)?;

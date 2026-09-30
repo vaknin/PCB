@@ -24,22 +24,55 @@ active_low = false     # optional; true adds PIN_<signal>_ACTIVE_LOW to the head
 sim = "led"            # optional: the Wokwi part on this pin (button, led, led_r, led_g, led_b, pot)
 note = ""              # optional; copied into the header comment
 
-[power]
-source = "USB-C 5 V"
-budget_ma = 500        # what the source may give; the loads must fit under it
+# Where the current comes from: one [[power.source]] per way the board is powered, each with the
+# limits that cap it (the budget is the smallest). A battery board has two: "usb" and "battery".
+[[power.source]]
+name = "usb"           # lower case; loads name it in `from`, requirements in power:usb / sleep:usb
+what = "USB-C 5 V, no PD"
+
+[[power.source.limit]]
+name = "USB 2.0 default current"
+ma = 500
+source = "USB 2.0; that every port gives at least this is INFERRED"
+
+# A battery board also has (limits: the regulator's rating and the cell's peak current):
+# [[power.source]]
+# name = "battery"
+# what = "single-cell LiPo through the RT9080 LDO"
+# sleep_ua = 20        # whole board asleep, µA (the spec's sleep requirement)
+#
+# [[power.source.limit]]
+# name = "RT9080 LDO output"
+# ma = 600
+# source = "RT9080 datasheet"
+#
+# [[power.source.limit]]
+# name = "cell peak discharge"
+# ma = 400
+# source = "INFERRED: 1C of a 400 mAh cell"
 
 # Worst-case current of each load, at the input. Say where each number comes from;
-# write INFERRED in `source` if it is a guess.
+# write INFERRED in `source` if it is a guess. `from` lists the sources it draws on
+# (default: all of them), e.g. from = ["usb"] for a battery charger.
 [[power.load]]
 name = "ESP32-S3 module, Wi-Fi transmit peak"
 ma = 355
 source = "WROOM-1 datasheet, HARDWARE_LESSONS.md"
+
+# What still draws current while the board sleeps, against the sources' sleep_ua (default: every
+# source with one). `source` must say INFERRED or VERIFIED.
+# [[power.sleep_load]]
+# name = "ESP32-S3 deep sleep, RTC GPIO wake"
+# ua = 8
+# source = "VERIFIED: <datasheet, version, page>"
 
 # One per requirement in spec.md, same IDs. covered_by lists what shows it is met:
 #   part:<ref>   a part in the circuit
 #   pin:<signal> a signal in the pin map above
 #   test:<name>  a firmware self-test below
 #   gate:<name>  erc, drc, netlist, netclasses, routing or board_toml
+#   power:<src>  that power source's current budget holds
+#   sleep:<src>  that source's sleep budget holds (the review page shows the total next to it)
 [[requirement]]
 id = "R1"
 text = "Shows that it is running with a status light"
@@ -59,10 +92,12 @@ level = 1
 
 # Values `devctl provision` writes into the board's NVS (optional). Only references go here,
 # never values: "file:<path>#<field>" (a key=value line in that file) or "prompt".
-# Keys: [a-z0-9_], at most 15 characters.
+# Keys: [a-z0-9_], at most 15 characters. A secret that expires takes a table with its expiry
+# date; the review page warns 60 days before it.
 # [provision]
 # wifi_ssid = "prompt"
 # gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
+# github_token = { from = "file:~/.config/capture-notes/config#github_token", expires = "2027-09-18" }
 
 # The printed case (optional; the `case` stage, D-025 Phase B). Two parts: a tray under the board
 # and a lid, closed by self-tapping screws from below through the board's mounting holes.

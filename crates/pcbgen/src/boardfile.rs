@@ -4,12 +4,15 @@
 //! ```toml
 //! [board]          name = "starter"; revision = "0"; module = "U1"
 //! [[pin]]          signal = "I2C_SDA"; pin = "IO1"; net = "I2C_SDA"; gpio = 1; dir = "io"
-//! [power]          source = "USB-C 5 V"; budget_ma = 500
-//! [[power.load]]   name = "ESP32-S3 Wi-Fi TX peak"; ma = 355; source = "WROOM-1 datasheet"
+//! [[power.source]] name = "usb"; what = "USB-C 5 V"; sleep_ua = 20 (optional)
+//! [[power.source.limit]] name = "USB 2.0 default"; ma = 500; source = "..."
+//! [[power.load]]   name = "ESP32-S3 Wi-Fi TX peak"; ma = 355; source = "WROOM-1 datasheet"; from = ["usb"]
+//! [[power.sleep_load]] name = "LDO quiescent"; ua = 2; source = "VERIFIED: datasheet p.3"
 //! [[requirement]]  id = "R1"; text = "..."; covered_by = ["part:J1", "pin:I2C_SDA", "test:sht40", "gate:drc"]
 //! [firmware]       self_test = ["sht40"]
 //! [[sim.wokwi_step]] wait = "SELFTEST_PRESS boot_button"; press = "BOOT"
 //! [provision]      gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
+//!                  github_token = { from = "file:...#github_token", expires = "2027-09-18" }
 //! [case]           material = "resin"; wall = 1.5; screw = "M3"
 //! [[case.opening]] ref = "J1"; kind = "usb_c"
 //! [case.battery]   size = [36, 17, 7.8]; lead = "J3"
@@ -47,10 +50,10 @@ pub struct BoardFile {
     #[serde(default)]
     pub sim: Sim,
     /// NVS key -> where `devctl provision` gets its value: `file:<path>#<field>` (a
-    /// `field = value` line in that file) or `prompt`. Only references; values never enter
-    /// the repo (D-025).
+    /// `field = value` line in that file) or `prompt`, optionally with the secret's expiry
+    /// date. Only references; values never enter the repo (D-025).
     #[serde(default)]
-    pub provision: BTreeMap<String, String>,
+    pub provision: BTreeMap<String, Provision>,
     /// The printed case (D-025 Phase B), built and fit-checked by the `case` stage; None: no case.
     pub case: Option<Case>,
 }
@@ -522,13 +525,43 @@ impl Dir {
     }
 }
 
+/// `[power]`: where the current comes from and what draws it. A board has one or more sources
+/// (USB, a battery), each with its own budget; a battery board adds a sleep budget (D-025 C.2).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Power {
-    pub source: String,
-    pub budget_ma: f64,
+    #[serde(rename = "source")]
+    pub sources: Vec<PowerSource>,
     #[serde(rename = "load", default)]
     pub loads: Vec<Load>,
+    /// What stays on while the board sleeps, against the sources' `sleep_ua`.
+    #[serde(rename = "sleep_load", default)]
+    pub sleep_loads: Vec<SleepLoad>,
+}
+
+/// `[[power.source]]`: one way the board is powered.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerSource {
+    /// Short lower-case name the loads' `from` uses: "usb", "battery".
+    pub name: String,
+    /// In words, for the review page: "USB-C 5 V, no PD".
+    pub what: String,
+    /// What caps the current; the budget is the smallest (a battery: its regulator and the
+    /// cell's peak).
+    #[serde(rename = "limit")]
+    pub limits: Vec<SupplyLimit>,
+    /// The whole board's budget while asleep on this source, µA (None: not a sleeping board).
+    pub sleep_ua: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupplyLimit {
+    pub name: String,
+    pub ma: f64,
+    /// Where the number comes from; say INFERRED if it is a guess.
+    pub source: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -538,6 +571,159 @@ pub struct Load {
     pub ma: f64,
     /// Where the number comes from; say INFERRED if it is a guess.
     pub source: String,
+    /// The sources it draws from (empty: all of them).
+    #[serde(default)]
+    pub from: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SleepLoad {
+    pub name: String,
+    pub ua: f64,
+    /// Where the number comes from; must say INFERRED or VERIFIED.
+    pub source: String,
+    /// The sources it draws from while asleep (empty: every source with a `sleep_ua`).
+    #[serde(default)]
+    pub from: Vec<String>,
+}
+
+/// One source's budgets and what is drawn from it.
+pub struct Tally<'a> {
+    pub source: &'a PowerSource,
+    /// The smallest limit, and which one it is (None: no limits, an error).
+    pub budget_ma: f64,
+    pub binding: Option<&'a SupplyLimit>,
+    pub loads: Vec<&'a Load>,
+    pub ma: f64,
+    pub sleep_loads: Vec<&'a SleepLoad>,
+    pub sleep_ua: f64,
+}
+
+impl Tally<'_> {
+    pub fn over(&self) -> bool {
+        self.ma > self.budget_ma
+    }
+    pub fn sleep_over(&self) -> bool {
+        self.source.sleep_ua.is_some_and(|b| self.sleep_ua > b)
+    }
+}
+
+impl Power {
+    /// Each source with its loads and totals, in file order.
+    pub fn tally(&self) -> Vec<Tally<'_>> {
+        self.sources
+            .iter()
+            .map(|s| {
+                let binding = s.limits.iter().min_by(|a, b| a.ma.total_cmp(&b.ma));
+                let loads: Vec<&Load> = self.loads.iter().filter(|l| l.from.is_empty() || l.from.contains(&s.name)).collect();
+                let sleep_loads: Vec<&SleepLoad> = self
+                    .sleep_loads
+                    .iter()
+                    .filter(|l| if l.from.is_empty() { s.sleep_ua.is_some() } else { l.from.contains(&s.name) })
+                    .collect();
+                Tally {
+                    source: s,
+                    budget_ma: binding.map_or(f64::NAN, |l| l.ma),
+                    binding,
+                    ma: loads.iter().map(|l| l.ma).sum(),
+                    sleep_ua: sleep_loads.iter().map(|l| l.ua).sum(),
+                    loads,
+                    sleep_loads,
+                }
+            })
+            .collect()
+    }
+
+    /// One line per source for the gate and the page: "usb 360.9 of 500 mA".
+    pub fn summary(&self) -> String {
+        let parts: Vec<String> = self
+            .tally()
+            .iter()
+            .map(|t| {
+                let mut s = format!("{} {:.1} of {} mA", t.source.name, t.ma, t.budget_ma);
+                if let Some(b) = t.source.sleep_ua {
+                    s += &format!(", asleep {:.1} of {b} µA", t.sleep_ua);
+                }
+                s
+            })
+            .collect();
+        parts.join("; ")
+    }
+}
+
+/// A `[provision]` value: a reference (`"prompt"`, `"file:<path>#<field>"`), or a table with the
+/// reference in `from` and the secret's expiry date, so the review page can warn before it
+/// lapses. Never the secret itself.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Provision {
+    Ref(String),
+    Entry(ProvisionEntry),
+}
+
+/// The table form of a `[provision]` value. Unknown keys are errors here too: a `value = ...`
+/// must never pass silently.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProvisionEntry {
+    pub from: String,
+    /// "YYYY-MM-DD": when the secret stops working (a token's expiry).
+    pub expires: Option<String>,
+}
+
+impl Provision {
+    pub fn reference(&self) -> &str {
+        match self {
+            Provision::Ref(r) => r,
+            Provision::Entry(e) => &e.from,
+        }
+    }
+    pub fn expires(&self) -> Option<&str> {
+        match self {
+            Provision::Entry(e) => e.expires.as_deref(),
+            Provision::Ref(_) => None,
+        }
+    }
+}
+
+impl From<String> for Provision {
+    fn from(r: String) -> Self {
+        Provision::Ref(r)
+    }
+}
+
+/// Days since 1970-01-01 of a "YYYY-MM-DD" date; None if it isn't a real date.
+pub fn day_number(date: &str) -> Option<i64> {
+    let b = date.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| date.get(r).filter(|x| x.bytes().all(|c| c.is_ascii_digit())).and_then(|x| x.parse::<i64>().ok());
+    let (y, m, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let len = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if !(1..=12).contains(&m) || d < 1 || d > len[m as usize - 1] {
+        return None;
+    }
+    // days from civil (H. Hinnant's algorithm)
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    Some(era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468)
+}
+
+/// Provision keys with an expiry date, and the days left from `today` (negative: expired).
+pub fn expiries(bf: &BoardFile, today: &str) -> Vec<(String, String, i64)> {
+    let Some(now) = day_number(today) else { return vec![] };
+    bf.provision
+        .iter()
+        .filter_map(|(k, v)| {
+            let e = v.expires()?;
+            Some((k.clone(), e.to_string(), day_number(e)? - now))
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -660,17 +846,7 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
     }
 
     // --- power ----------------------------------------------------------------
-    for l in &bf.power.loads {
-        if !(l.ma.is_finite() && l.ma >= 0.0) {
-            p.push(format!("power load {:?}: ma must be 0 or more", l.name));
-        }
-    }
-    let total: f64 = bf.power.loads.iter().map(|l| l.ma).sum();
-    if !(bf.power.budget_ma.is_finite() && bf.power.budget_ma > 0.0) {
-        p.push("power.budget_ma must be more than 0".into());
-    } else if total > bf.power.budget_ma {
-        p.push(format!("power: loads total {total} mA, over the {} mA budget", bf.power.budget_ma));
-    }
+    p.extend(power_problems(&bf.power));
 
     // --- order ------------------------------------------------------------------
     let o = &bf.order;
@@ -716,8 +892,10 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
                 Some(("pin", x)) => signals.contains(x),
                 Some(("test", x)) => tests.contains(x),
                 Some(("gate", x)) => GATES.contains(&x),
+                Some(("power", x)) => bf.power.sources.iter().any(|s| s.name == x),
+                Some(("sleep", x)) => bf.power.sources.iter().any(|s| s.name == x && s.sleep_ua.is_some()),
                 _ => {
-                    p.push(format!("{at}: {cov:?} must start with part:, pin:, test: or gate:"));
+                    p.push(format!("{at}: {cov:?} must start with part:, pin:, test:, gate:, power: or sleep:"));
                     continue;
                 }
             };
@@ -726,6 +904,8 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
                     "part" => "no such part in the circuit".to_string(),
                     "pin" => "no such signal in the pin map".to_string(),
                     "test" => "not in firmware.self_test".to_string(),
+                    "power" => "no such [[power.source]]".to_string(),
+                    "sleep" => "no [[power.source]] of that name with a sleep_ua".to_string(),
                     _ => format!("gates are {}", GATES.join(", ")),
                 };
                 p.push(format!("{at}: {cov:?}: {what}"));
@@ -741,11 +921,15 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
     if let Some(case) = &bf.case {
         p.extend(case_problems(case, c));
     }
-    let key =Regex::new(r"^[a-z0-9_]{1,15}$").unwrap();
-    for (k, v) in &bf.provision {
+    let key = Regex::new(r"^[a-z0-9_]{1,15}$").unwrap();
+    for (k, entry) in &bf.provision {
         if !key.is_match(k) {
             p.push(format!("provision key {k:?}: NVS keys are [a-z0-9_], at most 15 characters"));
         }
+        if let Some(e) = entry.expires().filter(|e| day_number(e).is_none()) {
+            p.push(format!("provision {k}: expires {e:?} must be a date, YYYY-MM-DD"));
+        }
+        let v = entry.reference();
         let ok = v == "prompt" || v.strip_prefix("file:").and_then(|f| f.split_once('#')).is_some_and(|(f, field)| !f.is_empty() && !field.is_empty());
         if !ok {
             p.push(format!("provision {k}: {v:?} must be \"prompt\" or \"file:<path>#<field>\""));
@@ -759,6 +943,81 @@ pub fn problems(bf: &BoardFile, c: &Circuit, spec_ids: Option<&BTreeSet<String>>
             }
             for id in ids.difference(spec) {
                 p.push(format!("board.toml requirement {id} is not in spec.md"));
+            }
+        }
+    }
+    p
+}
+
+/// `[power]`: names, numbers, and every source's loads under its budgets.
+fn power_problems(pw: &Power) -> Vec<String> {
+    let mut p = vec![];
+    if pw.sources.is_empty() {
+        p.push("power: no [[power.source]]".into());
+    }
+    let ident = Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();
+    let mut names = HashSet::new();
+    for s in &pw.sources {
+        let at = format!("power.source {:?}", s.name);
+        if !ident.is_match(&s.name) {
+            p.push(format!("{at}: name must be a lower-case identifier (a-z, 0-9, _)"));
+        }
+        if !names.insert(s.name.as_str()) {
+            p.push(format!("{at}: listed twice"));
+        }
+        if s.limits.is_empty() {
+            p.push(format!("{at}: no [[power.source.limit]], so no budget"));
+        }
+        for l in &s.limits {
+            if !(l.ma.is_finite() && l.ma > 0.0) {
+                p.push(format!("{at} limit {:?}: ma must be more than 0", l.name));
+            }
+        }
+        if s.sleep_ua.is_some_and(|b| !(b.is_finite() && b > 0.0)) {
+            p.push(format!("{at}: sleep_ua must be more than 0"));
+        }
+    }
+    let known = |from: &[String], what: &str, p: &mut Vec<String>| {
+        for f in from.iter().filter(|f| !names.contains(f.as_str())) {
+            p.push(format!("{what}: from {f:?}: no such [[power.source]]"));
+        }
+    };
+    for l in &pw.loads {
+        let at = format!("power.load {:?}", l.name);
+        if !(l.ma.is_finite() && l.ma >= 0.0) {
+            p.push(format!("{at}: ma must be 0 or more"));
+        }
+        known(&l.from, &at, &mut p);
+    }
+    let sleepers = pw.sources.iter().filter(|s| s.sleep_ua.is_some()).count();
+    for l in &pw.sleep_loads {
+        let at = format!("power.sleep_load {:?}", l.name);
+        if !(l.ua.is_finite() && l.ua >= 0.0) {
+            p.push(format!("{at}: ua must be 0 or more"));
+        }
+        if !(l.source.contains("INFERRED") || l.source.contains("VERIFIED")) {
+            p.push(format!("{at}: source must say INFERRED or VERIFIED"));
+        }
+        known(&l.from, &at, &mut p);
+        for f in &l.from {
+            if pw.sources.iter().any(|s| &s.name == f && s.sleep_ua.is_none()) {
+                p.push(format!("{at}: source {f:?} has no sleep_ua budget"));
+            }
+        }
+        if l.from.is_empty() && sleepers == 0 {
+            p.push(format!("{at}: no [[power.source]] has a sleep_ua budget"));
+        }
+    }
+    for t in pw.tally() {
+        let name = &t.source.name;
+        if let Some(l) = t.binding.filter(|l| l.ma.is_finite() && l.ma > 0.0 && t.over()) {
+            p.push(format!("power {name}: loads total {} mA, over the {} mA budget ({})", t.ma, t.budget_ma, l.name));
+        }
+        if let Some(b) = t.source.sleep_ua.filter(|b| b.is_finite() && *b > 0.0) {
+            if t.sleep_loads.is_empty() {
+                p.push(format!("power {name}: sleep_ua is set but no [[power.sleep_load]] draws from it"));
+            } else if t.sleep_over() {
+                p.push(format!("power {name}: asleep {} µA, over the {b} µA sleep budget", t.sleep_ua));
             }
         }
     }
@@ -914,19 +1173,17 @@ pub fn spec_ids(spec: &str) -> BTreeSet<String> {
     re.captures_iter(spec).map(|m| m[1].to_string()).collect()
 }
 
-/// The `BOARD.TOML` gate: prints the power margin and every problem.
+/// The `BOARD.TOML` gate: prints each power source's total and every problem.
 /// `dir` is the board's directory (for its `spec.md`).
 pub fn gate(bf: &BoardFile, c: &Circuit, dir: &Path) -> Result<bool> {
     let spec = dir.join("spec.md");
     let ids = if spec.exists() { Some(spec_ids(&std::fs::read_to_string(&spec)?)) } else { None };
-    let total: f64 = bf.power.loads.iter().map(|l| l.ma).sum();
     println!(
-        "== BOARD.TOML: {} pins, {} requirements, {} self-tests; power {total:.1} of {} mA ({:.1} mA margin)",
+        "== BOARD.TOML: {} pins, {} requirements, {} self-tests; power {}",
         bf.pins.len(),
         bf.requirements.len(),
         bf.firmware.self_test.len(),
-        bf.power.budget_ma,
-        bf.power.budget_ma - total
+        bf.power.summary()
     );
     let p = problems(bf, c, ids.as_ref());
     for line in &p {
@@ -995,9 +1252,14 @@ net = "DP"
 gpio = 20
 dir = "io"
 
-[power]
-source = "USB"
-budget_ma = 500
+[[power.source]]
+name = "usb"
+what = "USB"
+
+[[power.source.limit]]
+name = "USB 2.0"
+ma = 500
+source = "spec"
 
 [[power.load]]
 name = "module"
@@ -1085,6 +1347,118 @@ self_test = ["sensor"]
         assert!(with("wifi_pass = \"hunter2\"")[0].contains("must be \"prompt\""));
         assert!(with("file = \"file:x\"")[0].contains("file:<path>#<field>"));
         assert!(with("a_key_that_is_too_long = \"prompt\"")[0].contains("at most 15"));
+    }
+
+    /// A battery board: USB charges the cell and runs the board; the battery runs it alone.
+    const BATTERY: &str = r#"
+[[power.source]]
+name = "battery"
+what = "LiPo through the LDO"
+sleep_ua = 20
+
+[[power.source.limit]]
+name = "LDO"
+ma = 600
+source = "datasheet"
+
+[[power.source.limit]]
+name = "cell peak"
+ma = 400
+source = "INFERRED"
+
+[[power.load]]
+name = "charger"
+ma = 100
+source = "RPROG"
+from = ["usb"]
+
+[[power.sleep_load]]
+name = "module asleep"
+ua = 8
+source = "VERIFIED: datasheet"
+
+[[power.sleep_load]]
+name = "LDO quiescent"
+ua = 4
+source = "INFERRED"
+"#;
+
+    fn battery(from: &str, to: &str) -> Vec<String> {
+        let text = format!("{SAMPLE}{BATTERY}");
+        assert!(text.contains(from), "{from:?} not in the battery sample");
+        run(&text.replacen(from, to, 1), &circuit())
+    }
+
+    #[test]
+    fn power_sources_and_sleep() {
+        let text = format!("{SAMPLE}{BATTERY}");
+        assert_eq!(run(&text, &circuit()), Vec::<String>::new());
+        let bf = parse(&text).unwrap();
+        let t = bf.power.tally();
+        // usb: the module (all sources) and the charger (usb only)
+        assert_eq!((t[0].source.name.as_str(), t[0].ma, t[0].budget_ma, t[0].loads.len()), ("usb", 455.0, 500.0, 2));
+        // battery: the smaller limit binds; only the module draws; both sleep loads count
+        assert_eq!((t[1].ma, t[1].budget_ma, t[1].binding.unwrap().name.as_str()), (355.0, 400.0, "cell peak"));
+        assert_eq!((t[1].sleep_ua, t[1].sleep_loads.len(), t[0].sleep_loads.len()), (12.0, 2, 0));
+        assert_eq!(bf.power.summary(), "usb 455.0 of 500 mA; battery 355.0 of 400 mA, asleep 12.0 of 20 µA");
+        // requirements can be covered by a source's budgets
+        let covered = text.replace("\"gate:drc\"]", "\"gate:drc\", \"power:battery\", \"sleep:battery\"]");
+        assert_eq!(run(&covered, &circuit()), Vec::<String>::new());
+        let p = run(&text.replace("\"gate:drc\"]", "\"sleep:usb\", \"power:mains\"]"), &circuit());
+        assert!(p.len() == 2 && p[0].contains("no [[power.source]] of that name with a sleep_ua") && p[1].contains("no such [[power.source]]"), "{p:?}");
+
+        let one = |from: &str, to: &str, want: &str| {
+            let p = battery(from, to);
+            assert!(p.len() == 1 && p[0].contains(want), "{from:?} -> {to:?}: want {want:?}, got {p:?}");
+        };
+        one("ua = 8", "ua = 17", "power battery: asleep 21 µA, over the 20 µA sleep budget");
+        one("ma = 400", "ma = 300", "power battery: loads total 355 mA, over the 300 mA budget (cell peak)");
+        one("ma = 100", "ma = 200", "power usb: loads total 555 mA, over the 500 mA budget (USB 2.0)");
+        one("ua = 4\nsource = \"INFERRED\"", "ua = 4\nsource = \"guess\"", "power.sleep_load \"LDO quiescent\": source must say INFERRED or VERIFIED");
+        one("from = [\"usb\"]", "from = [\"mains\"]", "power.load \"charger\": from \"mains\": no such [[power.source]]");
+        one("ua = 4", "ua = 4\nfrom = [\"usb\"]", "source \"usb\" has no sleep_ua budget");
+        // a second "usb" also merges the loads, so it is over budget too
+        assert!(battery("name = \"battery\"", "name = \"usb\"").iter().any(|x| x.contains("power.source \"usb\": listed twice")));
+        one("name = \"battery\"", "name = \"Battery\"", "lower-case identifier");
+        one("sleep_ua = 20", "sleep_ua = 0", "sleep_ua must be more than 0");
+        one("ma = 600", "ma = -1", "limit \"LDO\": ma must be more than 0");
+        // a sleep budget with nothing counted against it proves nothing
+        let p = run(text.split("[[power.sleep_load]]").next().unwrap(), &circuit());
+        assert!(p.len() == 1 && p[0].contains("sleep_ua is set but no [[power.sleep_load]]"), "{p:?}");
+        // sleep loads with no sleeping source
+        let p = battery("sleep_ua = 20\n", "");
+        assert!(p.len() == 2 && p.iter().all(|x| x.contains("no [[power.source]] has a sleep_ua budget")), "{p:?}");
+        // a source needs at least one limit; the old single-source form no longer parses
+        assert!(parse(&SAMPLE.replace("[[power.source.limit]]\nname = \"USB 2.0\"\nma = 500\nsource = \"spec\"\n", "")).is_err());
+        assert!(parse(&SAMPLE.replace("[[power.source]]\nname = \"usb\"\nwhat = \"USB\"", "[power]\nsource = \"USB\"\nbudget_ma = 500")).is_err());
+    }
+
+    #[test]
+    fn provision_expiry() {
+        let with = |v: &str| format!("{SAMPLE}\n[provision]\n{v}\n");
+        let text = with("github_token = { from = \"file:~/c#github_token\", expires = \"2027-09-18\" }\nwifi_pass = \"prompt\"");
+        assert_eq!(run(&text, &circuit()), Vec::<String>::new());
+        let bf = parse(&text).unwrap();
+        assert_eq!(bf.provision["github_token"].reference(), "file:~/c#github_token");
+        assert_eq!(bf.provision["wifi_pass"].expires(), None);
+        assert_eq!(expiries(&bf, "2026-09-30"), vec![("github_token".to_string(), "2027-09-18".to_string(), 353)]);
+        assert_eq!(expiries(&bf, "2027-09-20")[0].2, -2);
+        // a table without expires is fine; a bad date or a bad reference in a table is not
+        assert_eq!(run(&with("k = { from = \"prompt\" }"), &circuit()), Vec::<String>::new());
+        let p = run(&with("k = { from = \"prompt\", expires = \"2027-02-29\" }"), &circuit());
+        assert!(p.len() == 1 && p[0].contains("must be a date, YYYY-MM-DD"), "{p:?}");
+        assert!(run(&with("k = { from = \"hunter2\" }"), &circuit())[0].contains("must be \"prompt\""));
+        assert!(parse(&with("k = { from = \"prompt\", value = \"x\" }")).is_err());
+    }
+
+    #[test]
+    fn day_numbers() {
+        assert_eq!(day_number("1970-01-01"), Some(0));
+        assert_eq!(day_number("2000-03-01"), Some(11017));
+        assert_eq!(day_number("2028-02-29").zip(day_number("2028-03-01")).map(|(a, b)| b - a), Some(1));
+        for bad in ["2027-13-01", "2027-02-29", "2027-9-18", "2027-09-18x", "20270918", "2027-09-00", "abcd-ef-gh"] {
+            assert_eq!(day_number(bad), None, "{bad}");
+        }
     }
 
     const CASE: &str = r#"
@@ -1208,7 +1582,7 @@ style = "hole"
         one("gpio = 1\n", "gpio = 2\n", "IO1 is GPIO 1, not 2");
         one("net = \"SDA\"", "net = \"SCL\"", "on net SDA, not SCL");
         one("signal = \"BOOT\"", "signal = \"Boot\"", "upper-case C identifier");
-        one("budget_ma = 500", "budget_ma = 300", "over the 300 mA budget");
+        one("ma = 500", "ma = 300", "power usb: loads total 355 mA, over the 300 mA budget (USB 2.0)");
         one("[firmware]", "[order]\nassembled = 6\n\n[firmware]", "6 assembled of 5 boards");
         one("\"gate:drc\"", "\"gate:lint\"", "gates are");
         one("\"part:R1\"", "\"part:R9\"", "no such part");
