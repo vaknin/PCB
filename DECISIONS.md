@@ -3,6 +3,11 @@
 Newest first. Each entry: what was decided, why, and status (proposed / confirmed by owner).
 Research behind these: `research/2026-09-29-landscape.md`.
 
+## D-026 Pipeline tools for any ESP32 board, and the skill in the repo (DECIDED, owner asked for "2 and 3", 2026-10-01)
+- **Owner's direction:** "im mostly talking about creating the pipeline and skill good, i dont care about the specific single-button project"; "i only want esp32 anyway". So no support for other chips; capture-clip is parked (its WIP committed as-is at the owner's OK, `32c2c54`). Plan: parts search, parts import and a footprint drift guard, `pcb new` with shared ESP32 circuit blocks, simulator scenarios run by the `sim` stage, and the skill rebuilt.
+- **The skill lives in the repo** at `.claude/skills/pcb-pipeline/`; `~/.claude/skills/pcb-pipeline` is a symlink to it (like the `ideas` skill), so it is versioned and loads anywhere. It is a short `SKILL.md` (rules, reading list, run line, task → file table) and seven reference files that point at `docs/` instead of copying them. Why: the old global file was ~60 % copied from `docs/pipeline.md` and `docs/workflow.md` and had already drifted (devctl flags, components, nodump). Dated owner quotes stay here, not in the skill.
+- **`scripts/skill-check.sh`** (first step of `scripts/fw-test.sh`) fails when the skill names a script, stage, flag or `board.toml` key the code doesn't have. Text for tools not merged yet sits in `<!-- pending -->` blocks, which are listed, not checked.
+
 ## D-025 Plan: shared firmware and enclosure tooling (proven on the starter), then capture-clip (DECIDED, owner agreed, 2026-09-29)
 - **Owner's words (relayed by session pcb-df):** "plan everything, including enclosure, firmware, etc."
 - **The plan:** `docs/plan.md`. Phases: A shared firmware base (`firmware/components/`, template, `sim` stage, `devctl` bring-up tool); B enclosure tooling (`case` stage, CadQuery template, fit gate); C workflow changes (the case moves into the design rounds; battery and sleep budgets in `board.toml`); D capture-clip firmware in simulation; E its circuit, layout and case in rounds; F order, bring-up, next revision.
@@ -567,7 +572,7 @@ at JLCPCB (the 5-board price covers up to 100×100).
   - a 4-layer routing variant for comparison
   - vendoring the verified footprints into the repo (`lib/footprints/` exists since D-015; only the modified ESP32 footprint is there)
   - (a JLCPCB parts/cost script: the `cost` stage, D-023; the A/B/C comparison is still open)
-  - (project skill: done as the global draft `~/.claude/skills/pcb-pipeline/SKILL.md`, at the owner's request)
+  - (project skill: in the repo at `.claude/skills/pcb-pipeline/`, D-026)
   - check every UNVERIFIED rotation in JLCPCB's placement preview (list in `boards/<name>/fab/README.md`)
   - the fab's own manufacturability check on upload; current fab promotions (NextPCB Rev 0 vs JLCPCB); the A/B/C cost table from `docs/brief.md`
   - (D-021) whether 5 is JLCPCB's smallest bare-PCB quantity with 2 assembled, and whether a module pre-ordered into "My Parts Lib" still pays the $3.07 Extended fee in each later order
