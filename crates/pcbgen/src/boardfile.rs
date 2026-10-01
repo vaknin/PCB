@@ -11,6 +11,7 @@
 //! [[requirement]]  id = "R1"; text = "..."; covered_by = ["part:J1", "pin:I2C_SDA", "test:sht40", "gate:drc"]
 //! [firmware]       self_test = ["sht40"]
 //! [[sim.wokwi_step]] wait = "SELFTEST_PRESS boot_button"; press = "BOOT"
+//! [[sim.scenario]] name = "press"; about = "..."; [[sim.scenario.step]] sim = "PRESS 300"
 //! [provision]      gemini_api_key = "file:~/.config/capture-notes/config#gemini_api_key"
 //!                  github_token = { from = "file:...#github_token", expires = "2027-09-18" }
 //! [case]           material = "resin"; wall = 1.5; screw = "M3"
@@ -441,7 +442,72 @@ impl Case {
 pub struct Sim {
     #[serde(rename = "wokwi_step", default)]
     pub wokwi_steps: Vec<WokwiStep>,
+    /// QEMU scenarios the `sim` stage runs (`crate::scenario`), each on a fresh copy of the image.
+    #[serde(rename = "scenario", default)]
+    pub scenarios: Vec<Scenario>,
 }
+
+/// `[[sim.scenario]]`: the firmware driven over its console in QEMU (unlimited, no pins), passed
+/// or failed on what it prints. A `[[requirement.proof]]` with `evidence = "scenario:<name>"`
+/// points at its result.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Scenario {
+    /// `[a-z0-9_]+`, unique on the board.
+    pub name: String,
+    /// What it shows, in plain words (the review page's table).
+    pub about: String,
+    /// Give QEMU its Ethernet (`-nic user,model=open_eth`, the Wi-Fi stand-in).
+    #[serde(default)]
+    pub nic: bool,
+    /// NVS values set over the console after boot (`PROV SET`). Literals only, never secrets:
+    /// they are in the repo.
+    #[serde(default)]
+    pub provision: BTreeMap<String, String>,
+    #[serde(rename = "step", default)]
+    pub steps: Vec<ScenarioStep>,
+}
+
+/// One step of a scenario: exactly one verb.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioStep {
+    /// A console line, as is.
+    pub send: Option<String>,
+    /// `SIM <this>`, then wait (10 s) for the firmware's `SIM OK <this>` (firmware/components/simcmd).
+    pub sim: Option<String>,
+    /// A regex for the next console line to wait for (after the last one matched).
+    pub wait: Option<String>,
+    /// The next `<TAG> {json}` line whose fields equal `fields`.
+    pub expect_json: Option<String>,
+    pub fields: Option<BTreeMap<String, serde_json::Value>>,
+    /// For `wait` and `expect_json`; 30 s if not given.
+    pub timeout_ms: Option<u64>,
+    /// Let the firmware run this long.
+    pub sleep_ms: Option<u64>,
+    /// `reboot = true`: kill QEMU and boot again on the same image (a power cycle).
+    pub reboot: Option<bool>,
+}
+
+impl ScenarioStep {
+    /// The verbs set on this step (a valid step has one).
+    pub fn verbs(&self) -> Vec<&'static str> {
+        [
+            ("send", self.send.is_some()),
+            ("sim", self.sim.is_some()),
+            ("wait", self.wait.is_some()),
+            ("expect_json", self.expect_json.is_some()),
+            ("sleep_ms", self.sleep_ms.is_some()),
+            ("reboot", self.reboot.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(v, on)| on.then_some(v))
+        .collect()
+    }
+}
+
+/// The longest wait a scenario step may ask for (and the longest sleep).
+pub const SCENARIO_MAX_MS: u64 = 300_000;
 
 /// One step of the Wokwi self-test run: wait for a console line, then press a button or check
 /// a pin. The run always ends by waiting for `SELFTEST_DONE`.
@@ -1204,6 +1270,107 @@ fn sim_problems(bf: &BoardFile) -> Vec<String> {
             _ => p.push(format!("{at}: needs exactly one of press or expect")),
         }
     }
+    p.extend(scenario_problems(bf));
+    p
+}
+
+fn scenario_problems(bf: &BoardFile) -> Vec<String> {
+    let mut p = vec![];
+    let name_re = Regex::new(r"^[a-z0-9_]+$").unwrap();
+    let key_re = Regex::new(r"^[a-z0-9_]{1,15}$").unwrap();
+    let tag_re = Regex::new(r"^[A-Z][A-Z0-9_]*$").unwrap();
+    let mut names = HashSet::new();
+    for (i, sc) in bf.sim.scenarios.iter().enumerate() {
+        let at = format!("sim.scenario {} ({:?})", i + 1, sc.name);
+        if !name_re.is_match(&sc.name) {
+            p.push(format!("{at}: name must be [a-z0-9_]+"));
+        }
+        if !names.insert(sc.name.as_str()) {
+            p.push(format!("{at}: a second scenario with this name"));
+        }
+        if sc.about.trim().is_empty() {
+            p.push(format!("{at}: about is empty"));
+        }
+        if sc.steps.is_empty() {
+            p.push(format!("{at}: no steps"));
+        }
+        for (k, v) in &sc.provision {
+            if !key_re.is_match(k) {
+                p.push(format!("{at}: provision key {k:?} must be [a-z0-9_], at most 15 characters"));
+            }
+            // [provision]'s reference forms would be sent as literal text: say so instead
+            if v.starts_with("file:") || v == "prompt" {
+                p.push(format!("{at}: provision {k} must be a literal value (never a secret or a reference)"));
+            }
+            if v.len() > 512 {
+                p.push(format!("{at}: provision {k} is over 512 bytes"));
+            }
+        }
+        for (j, st) in sc.steps.iter().enumerate() {
+            let at = format!("{at} step {}", j + 1);
+            let verbs = st.verbs();
+            if verbs.len() != 1 {
+                p.push(format!("{at}: needs exactly one of send, sim, wait, expect_json, sleep_ms, reboot (has {verbs:?})"));
+                continue;
+            }
+            let one_line = |what: &str, s: &str, p: &mut Vec<String>| {
+                if s.trim().is_empty() || s.contains(['\n', '\r']) {
+                    p.push(format!("{at}: {what} must be one non-empty line"));
+                }
+            };
+            match verbs[0] {
+                "send" => one_line("send", st.send.as_deref().unwrap_or(""), &mut p),
+                "sim" => {
+                    let s = st.sim.as_deref().unwrap_or("");
+                    one_line("sim", s, &mut p);
+                    if s.trim_start().starts_with("SIM ") {
+                        p.push(format!("{at}: sim is what follows `SIM ` (e.g. \"PRESS 300\")"));
+                    }
+                }
+                "wait" => {
+                    if let Err(e) = Regex::new(st.wait.as_deref().unwrap_or("")) {
+                        p.push(format!("{at}: wait is not a regex: {e}"));
+                    }
+                }
+                "expect_json" => {
+                    if !tag_re.is_match(st.expect_json.as_deref().unwrap_or("")) {
+                        p.push(format!("{at}: expect_json is the line's tag, [A-Z][A-Z0-9_]* (e.g. \"SELFTEST\")"));
+                    }
+                    if st.fields.as_ref().is_none_or(BTreeMap::is_empty) {
+                        p.push(format!("{at}: expect_json needs fields = {{ ... }}"));
+                    }
+                }
+                "sleep_ms" => {
+                    if !(1..=SCENARIO_MAX_MS).contains(&st.sleep_ms.unwrap_or(0)) {
+                        p.push(format!("{at}: sleep_ms must be 1..={SCENARIO_MAX_MS}"));
+                    }
+                }
+                _ => {
+                    if st.reboot != Some(true) {
+                        p.push(format!("{at}: reboot takes only true"));
+                    }
+                }
+            }
+            if st.fields.is_some() && verbs[0] != "expect_json" {
+                p.push(format!("{at}: fields goes with expect_json"));
+            }
+            if let Some(t) = st.timeout_ms {
+                if !matches!(verbs[0], "wait" | "expect_json") {
+                    p.push(format!("{at}: timeout_ms goes with wait or expect_json"));
+                } else if !(1..=SCENARIO_MAX_MS).contains(&t) {
+                    p.push(format!("{at}: timeout_ms must be 1..={SCENARIO_MAX_MS}"));
+                }
+            }
+        }
+    }
+    // a proof that names a scenario is a simulation
+    for q in &bf.requirements {
+        for pr in &q.proofs {
+            if pr.evidence.trim().starts_with("scenario:") && pr.how != How::Simulated {
+                p.push(format!("requirement {} proof {:?}: a scenario proof needs how = \"simulated\"", q.id, pr.evidence.trim()));
+            }
+        }
+    }
     p
 }
 
@@ -1471,6 +1638,72 @@ self_test = ["sensor"]
         bad("wait = \"SELFTEST_PRESS\"", "wait = \" \"", "wait is empty");
         // a sim part on the USB pin
         bad("gpio = 20\ndir = \"io\"", "gpio = 20\ndir = \"io\"\nsim = \"led\"", "USB or the UART console");
+    }
+
+    const SCENARIO: &str = r#"
+[[sim.scenario]]
+name = "press"
+about = "A press is seen"
+nic = true
+provision = { sim_note = "kept" }
+[[sim.scenario.step]]
+wait = "^PROV READY"
+timeout_ms = 60000
+[[sim.scenario.step]]
+sim = "PRESS 300"
+[[sim.scenario.step]]
+expect_json = "BUTTON"
+fields = { kind = "short", n = 1 }
+[[sim.scenario.step]]
+send = "SELFTEST"
+[[sim.scenario.step]]
+sleep_ms = 500
+[[sim.scenario.step]]
+reboot = true
+"#;
+
+    #[test]
+    fn sim_scenarios() {
+        let ok = format!("{SAMPLE}{SCENARIO}");
+        assert_eq!(run(&ok, &circuit()), Vec::<String>::new());
+        let bf = parse(&ok).unwrap();
+        let sc = &bf.sim.scenarios[0];
+        assert!(sc.nic && sc.provision["sim_note"] == "kept" && sc.steps.len() == 6);
+        assert_eq!(sc.steps[2].fields.as_ref().unwrap()["n"], serde_json::json!(1));
+        assert_eq!(sc.steps[5].verbs(), ["reboot"]);
+        // unknown keys and verbs are errors
+        assert!(parse(&ok.replace("sleep_ms = 500", "sleep = 500")).is_err());
+        assert!(parse(&ok.replace("nic = true", "net = true")).is_err());
+
+        let bad = |from: &str, to: &str, want: &str| {
+            assert!(ok.contains(from), "{from:?} not in the sample");
+            let p = run(&ok.replacen(from, to, 1), &circuit());
+            assert!(p.iter().any(|x| x.contains(want)), "{from:?} -> {to:?}: want {want:?}, got {p:?}");
+        };
+        bad("name = \"press\"", "name = \"Press me\"", "name must be [a-z0-9_]+");
+        bad("about = \"A press is seen\"", "about = \" \"", "about is empty");
+        bad("sim_note = \"kept\"", "sim_note = \"file:~/.config/x#k\"", "literal value");
+        bad("sim_note = \"kept\"", "sim_note = \"prompt\"", "literal value");
+        bad("sim_note = \"kept\"", "Sim-Note = \"kept\"", "provision key");
+        bad("sim = \"PRESS 300\"", "sim = \"PRESS 300\"\nsend = \"x\"", "exactly one of");
+        bad("sim = \"PRESS 300\"", "sim = \"SIM PRESS 300\"", "what follows `SIM `");
+        bad("send = \"SELFTEST\"", "send = \"a\\nb\"", "one non-empty line");
+        bad("wait = \"^PROV READY\"", "wait = \"^PROV (READY\"", "not a regex");
+        bad("expect_json = \"BUTTON\"", "expect_json = \"button\"", "the line's tag");
+        bad("fields = { kind = \"short\", n = 1 }", "fields = {}", "needs fields");
+        bad("sleep_ms = 500", "sleep_ms = 0", "sleep_ms must be");
+        bad("sleep_ms = 500", "sleep_ms = 500\nreboot = true", "exactly one of");
+        bad("send = \"SELFTEST\"", "send = \"SELFTEST\"\ntimeout_ms = 10", "timeout_ms goes with wait or expect_json");
+        bad("timeout_ms = 60000", "timeout_ms = 600000", "timeout_ms must be");
+        bad("send = \"SELFTEST\"", "send = \"SELFTEST\"\nfields = { a = 1 }", "fields goes with expect_json");
+        bad("reboot = true", "reboot = false", "reboot takes only true");
+        let twice = format!("{ok}{}", SCENARIO.replace("about = \"A press is seen\"", "about = \"again\""));
+        assert!(run(&twice, &circuit()).iter().any(|x| x.contains("a second scenario")));
+        let no_steps = format!("{SAMPLE}[[sim.scenario]]\nname = \"x\"\nabout = \"y\"\n");
+        assert!(run(&no_steps, &circuit()).iter().any(|x| x.contains("no steps")));
+        // a proof that names a scenario must say it was simulated
+        let proof = format!("{SAMPLE}[[requirement.proof]]\nhow = \"datasheet\"\nevidence = \"scenario:press\"\n{SCENARIO}");
+        assert!(run(&proof, &circuit()).iter().any(|x| x.contains("needs how = \"simulated\"")));
     }
 
     #[test]

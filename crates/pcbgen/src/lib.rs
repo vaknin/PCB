@@ -25,6 +25,7 @@ pub mod report;
 pub mod review;
 pub mod route;
 pub mod scaffold;
+pub mod scenario;
 pub mod schematic;
 pub mod ses;
 pub mod sexpr;

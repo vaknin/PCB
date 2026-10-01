@@ -4,7 +4,8 @@
 # usage: scripts/freeze.sh [--dry-run] <board>
 # The revision comes from boards/<board>/board.toml. HEAD must carry a draft tag, so the
 # frozen version is one the owner has seen. The readiness page (the `review` stage) must be
-# newer than board.toml and show nothing red (docs/workflow.md "Right the first time").
+# newer than board.toml and firmware/sim.json and show nothing red (docs/workflow.md
+# "Right the first time").
 # The tag's message carries the library manifest (scripts/lib-hashes.sh: the sha256 of every
 # footprint and symbol the board uses, and the kicad-cli version), which check-frozen.sh
 # compares before an order. `--dry-run` runs every check and prints the message, tags nothing.
@@ -28,6 +29,9 @@ ready=boards/$board/review/readiness.json
 run="cargo run --release -p $board -- review"
 [[ -f $ready ]] || { echo "no $ready: make the readiness page ($run) and show it to the owner first" >&2; exit 1; }
 [[ $toml -nt $ready ]] && { echo "$ready is older than $toml: re-run the review stage ($run) and show the owner the new readiness page" >&2; exit 1; }
+# a proof `scenario:<name>` is only as fresh as the last sim run
+sim=boards/$board/firmware/sim.json
+[[ -f $sim && $sim -nt $ready ]] && { echo "$ready is older than $sim: re-run the review stage ($run) and show the owner the new readiness page" >&2; exit 1; }
 red=$(sed -n 's/^ *"red": *\([0-9][0-9]*\).*/\1/p' "$ready" | head -1)
 [[ -n $red ]] || { echo "no \"red\" count in $ready: re-run the review stage ($run)" >&2; exit 1; }
 if (( red > 0 )); then

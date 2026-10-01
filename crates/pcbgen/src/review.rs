@@ -86,8 +86,52 @@ fn firmware_section(path: &Path, risks: &mut Vec<String>) -> String {
             esc(date),
             if problems.is_empty() { String::new() } else { format!("<ul class=\"risks\">{}</ul>\n", problems.join("")) },
         );
+        if key == "qemu" {
+            out += &scenario_section(&sim, risks);
+        }
     }
     out
+}
+
+/// sim.json's `scenarios` (D-025, `crate::scenario`): one row each, pass or fail, with what it
+/// showed and how often QEMU itself crashed on the way.
+fn scenario_section(sim: &Value, risks: &mut Vec<String>) -> String {
+    let what = "The firmware driven through what a person does (presses, power cuts, a network that comes and goes), on the simulated chip.";
+    let Some(list) = sim["scenarios"].as_array().filter(|l| !l.is_empty()) else {
+        return format!("<h3>Scenarios</h3>\n<p class=\"muted\">{what} None defined for this board yet.</p>\n");
+    };
+    let failed: Vec<&str> = list.iter().filter(|s| s["ok"] != true).filter_map(|s| s["scenario"].as_str()).collect();
+    if !failed.is_empty() {
+        risks.push(format!("Simulated scenarios fail: {} (see Firmware in simulation).", failed.iter().map(|n| format!("<code>{}</code>", esc(n))).collect::<Vec<_>>().join(", ")));
+    }
+    let crashes: u64 = list.iter().filter_map(|s| s["qemu_crashes"].as_u64()).sum();
+    let mut rows = String::new();
+    for s in list {
+        let ok = s["ok"] == true;
+        let mut evidence = s["evidence"].as_str().unwrap_or("").to_string();
+        if let Some((i, _)) = evidence.char_indices().nth(400) {
+            evidence = format!("{}…", &evidence[..i]); // a traceback is in the log, not here
+        }
+        let about = s["about"].as_str().map(|a| format!("<br><span class=\"muted\">{}</span>", esc(a))).unwrap_or_default();
+        let n = s["qemu_crashes"].as_u64().unwrap_or(0);
+        let _ = writeln!(
+            rows,
+            "<tr><td><code>{}</code>{about}</td><td>{}</td><td>{:.0} s</td><td>{}</td><td>{}</td></tr>",
+            esc(s["scenario"].as_str().unwrap_or("?")),
+            chip(if ok { "ok" } else { "bad" }, if ok { "Pass" } else { "Fail" }),
+            s["seconds"].as_f64().unwrap_or(0.0),
+            esc(&evidence),
+            if n == 0 { "0".to_string() } else { chip("warn", &n.to_string()) },
+        );
+    }
+    let passed = list.len() - failed.len();
+    format!(
+        "<h3>Scenarios {}</h3>\n<p class=\"muted\">{what} {passed} of {} pass.{}</p>\n\
+         <div class=\"scroll\"><table><thead><tr><th>Scenario</th><th>Result</th><th>Time</th><th>What it showed</th><th>QEMU crashes</th></tr></thead><tbody>\n{rows}</tbody></table></div>\n",
+        chip(if failed.is_empty() { "ok" } else { "bad" }, if failed.is_empty() { "Pass" } else { "Fail" }),
+        list.len(),
+        if crashes > 0 { " A QEMU crash is the simulator's fault, not the firmware's: that scenario was run again." } else { "" },
+    )
 }
 
 /// One table row per self-test in a `SELFTEST` report (sim.json's runs, devctl's bring-up files).
@@ -706,7 +750,8 @@ pub fn write(i: &Inputs) -> Result<std::path::PathBuf> {
     let date = crate::schematic::today();
     // the readiness page lists the same automatic findings, so it is written once they are all in
     let dir = i.base.join("review");
-    let ready = readiness::write(&dir, c, bf, &risks, &date)?;
+    let sim = read_json(&i.base.join("firmware/sim.json"));
+    let ready = readiness::write(&dir, c, bf, sim.as_ref(), &risks, &date)?;
     println!("readiness: {} ({})", dir.join(readiness::PAGE).display(), ready.verdict());
 
     let mut h = String::new();
@@ -949,6 +994,27 @@ source = "INFERRED"
         assert!(html.contains("chip bad\">Fail") && html.contains("<code>mic</code>") && html.contains("should show red"), "{html}");
         assert_eq!(risks, vec!["The built board fails its self-test (see Bring-up)."]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scenario_table() {
+        let mut risks = vec![];
+        assert!(scenario_section(&serde_json::json!({"scenarios": []}), &mut risks).contains("None defined"));
+        let sim = serde_json::json!({"scenarios": [
+            {"scenario": "press", "about": "A press <is> seen", "ok": true, "seconds": 12.4, "evidence": "BUTTON {\"kind\":\"short\"}", "qemu_crashes": 0},
+            {"scenario": "rollback", "ok": false, "seconds": 80.0, "evidence": "x".repeat(500), "qemu_crashes": 2},
+        ]});
+        let html = scenario_section(&sim, &mut risks);
+        for want in [
+            "<h3>Scenarios <span class=\"chip bad\">Fail</span></h3>",
+            "1 of 2 pass. A QEMU crash is the simulator's fault",
+            "<tr><td><code>press</code><br><span class=\"muted\">A press &lt;is&gt; seen</span></td><td><span class=\"chip ok\">Pass</span></td><td>12 s</td><td>BUTTON {&quot;kind&quot;:&quot;short&quot;}</td><td>0</td></tr>",
+            "<span class=\"chip warn\">2</span>",
+            &format!("{}…", "x".repeat(400)),
+        ] {
+            assert!(html.contains(want), "missing {want:?} in\n{html}");
+        }
+        assert_eq!(risks, vec!["Simulated scenarios fail: <code>rollback</code> (see Firmware in simulation)."]);
     }
 
 }
