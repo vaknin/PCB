@@ -7,3 +7,4 @@ boards/*/review/
 enclosure/.venv/
 boards/*/case/board.step
 __pycache__/
+.claude/worktrees/
