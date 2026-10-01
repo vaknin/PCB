@@ -19,4 +19,4 @@ Owner is not an EE. Full brief: `docs/brief.md`.
 - Choices the owner makes (look, feel, price: case, material, colour, size, features, cost
   tiers) and cost trade-offs (which fab, fee-bearing parts vs fee-free substitutes,
   cheaper-but-less) go on an Artifact choice page with a picture and price per option, then
-  `AskUserQuestion`; never as plain terminal text and never decided by Claude. Details: `docs/workflow.md` and the pcb-pipeline skill.
+  `AskUserQuestion`; never as plain terminal text and never decided by Claude. Details: `docs/workflow.md` and `.claude/skills/pcb-pipeline/choice-page.md`.
