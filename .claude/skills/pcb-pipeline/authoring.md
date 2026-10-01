@@ -5,14 +5,16 @@ committed) is in `docs/pipeline.md` "A board directory". The worked example is
 `boards/starter/src/{main,circuit,layout}.rs`: copy from it rather than from memory.
 
 ## A new board
-<!-- pending: lands with 2a/2b/2c/2d -->
 - Scaffold it: `cargo run --release -p pcbgen --bin pcb -- new <name>` writes `boards/<name>/`
-  (crate, `spec.md`, `board.toml`, a circuit built from `pcbgen::blocks`).
-- Prefer the blocks over rewriting common circuits: `esp32s3_core` (module, boot/reset,
-  decoupling), `usb_c_power`, `ldo_3v3`. They carry the verified pinouts.
-<!-- /pending -->
-- Then `spec.md` and `board.toml` from `templates/` (`docs/workflow.md` step 2), then the
-  circuit, then the layout.
+  (crate, `spec.md`, `board.toml`, `round.md`, a 50×50 mm ESP32-S3 board that already passes
+  every gate). Its templates are `templates/board/`.
+- Prefer the blocks over rewriting common circuits (`crates/pcbgen/src/blocks.rs`):
+  `esp32s3_core` (module, decoupling, EN, reset, optional boot button), `usb_c_power` (with
+  `.fused(net)` for a fuse), `ldo_3v3` (LDL1117 or HE9073). They carry the verified pinouts;
+  end a circuit with `nc_unconnected` for the module pins left over.
+- Then fill in `spec.md` and `board.toml` (`docs/workflow.md` step 2), then the circuit, then
+  the layout. A module other than ESP32-S3-WROOM-1/-1U needs an entry in `MODULES` in
+  `crates/pcbgen/src/boardfile.rs`.
 
 ## Parts
 <!-- pending: lands with 2a/2b/2c/2d -->
@@ -47,8 +49,8 @@ committed) is in `docs/pipeline.md` "A board directory". The worked example is
   module GPIO missing from the map, loads over a source's budget, sleep total over `sleep_ua`,
   a requirement uncovered or missing from `spec.md`. Change a pin in `circuit.rs` → change
   `board.toml` in the same edit.
-- Only ESP32-S3-WROOM-1 has a GPIO table (`crates/pcbgen/src/boardfile.rs`); a new module
-  needs one.
+- Only ESP32-S3-WROOM-1 and -1U have a GPIO table (`MODULES` in `crates/pcbgen/src/boardfile.rs`);
+  another module needs an entry there.
 - Case: flat cases rarely give an M3 screw 2 × d of thread in the lid; use `screw = "M2"`.
 
 ## Placement: order of work
