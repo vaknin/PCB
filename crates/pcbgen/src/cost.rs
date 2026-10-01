@@ -9,14 +9,14 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::board::Board;
-
-pub const API: &str = "https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList";
+use crate::circuit::Circuit;
+pub use crate::jlc::{API, Listing};
+use crate::jlc::{Jlc, mpn_matches};
 
 /// (name, USD, source). JLCPCB Economic PCBA, 2-layer PCB up to 100×100 mm, qty 5.
 pub const FEES: [(&str, f64, &str); 5] = [
@@ -34,63 +34,6 @@ pub const VAT: f64 = 0.18;
 
 fn fee(name: &str) -> f64 {
     FEES.iter().find(|f| f.0 == name).unwrap().1
-}
-
-/// One BOM line as JLCPCB lists it.
-#[derive(Clone, Debug)]
-pub struct Listing {
-    /// "basic", "preferred" (Preferred Extended) or "extended".
-    pub library: String,
-    pub stock: u64,
-    /// Minimum order (`leastPatchNumber`) and attrition (`lossNumber`) for assembly.
-    pub minimum: u64,
-    pub attrition: u64,
-    /// (from qty, to qty or None for no limit, USD each).
-    pub tiers: Vec<(u64, Option<u64>, f64)>,
-}
-
-/// The listing for one LCSC code, from the API's JSON answer.
-pub fn listing(answer: &Value, lcsc: &str) -> Result<Listing> {
-    let list = answer["data"]["componentPageInfo"]["list"].as_array().context("no data.componentPageInfo.list in the answer")?;
-    let c = list.iter().find(|c| c["componentCode"] == lcsc).with_context(|| format!("{lcsc} not in JLCPCB's parts list"))?;
-    let library = match (c["componentLibraryType"].as_str(), c["preferredComponentFlag"].as_bool()) {
-        (Some("base"), _) => "basic",
-        (Some("expand"), Some(true)) => "preferred",
-        (Some("expand"), _) => "extended",
-        (t, _) => bail!("{lcsc}: unknown library type {t:?}"),
-    };
-    let tiers = c["componentPrices"]
-        .as_array()
-        .context("no componentPrices")?
-        .iter()
-        .map(|t| {
-            let to = t["endNumber"].as_i64().filter(|&n| n >= 0).map(|n| n as u64);
-            Ok((t["startNumber"].as_u64().context("startNumber")?, to, t["productPrice"].as_f64().context("productPrice")?))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    if tiers.is_empty() {
-        bail!("{lcsc}: no price tiers");
-    }
-    Ok(Listing {
-        library: library.into(),
-        stock: c["stockCount"].as_u64().unwrap_or(0),
-        minimum: c["leastPatchNumber"].as_u64().unwrap_or(0),
-        attrition: c["lossNumber"].as_u64().unwrap_or(0),
-        tiers,
-    })
-}
-
-impl Listing {
-    /// What JLCPCB buys for `needed` placements: needed + attrition, at least the
-    /// minimum (the model in the cost estimate, INFERRED).
-    pub fn order_qty(&self, needed: u64) -> u64 {
-        (needed + self.attrition).max(self.minimum)
-    }
-    /// Unit price at a quantity: the tier that covers it, else the nearest one.
-    pub fn unit(&self, qty: u64) -> f64 {
-        let covers = |t: &&(u64, Option<u64>, f64)| t.0 <= qty && t.1.is_none_or(|to| qty <= to);
-        self.tiers.iter().find(covers).or_else(|| self.tiers.iter().rfind(|t| t.0 <= qty)).unwrap_or(&self.tiers[0]).2
-    }
 }
 
 /// A BOM line: (comment, refs, lcsc).
@@ -165,21 +108,6 @@ fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
-/// One part's listing from JLCPCB (curl, like kicad-cli is run: no HTTP crate).
-fn fetch(lcsc: &str) -> Result<Listing> {
-    let body = json!({"keyword": lcsc, "currentPage": 1, "pageSize": 10}).to_string();
-    let out = Command::new("curl")
-        .args(["-sS", "-f", "-m", "30", "--retry", "2", "-X", "POST", API, "-H", "Content-Type: application/json"])
-        .args(["-H", "User-Agent: Mozilla/5.0 (X11; Linux x86_64)", "-d", &body])
-        .output()
-        .context("running curl")?;
-    if !out.status.success() {
-        bail!("{lcsc}: JLCPCB parts API: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let answer: Value = serde_json::from_slice(&out.stdout).with_context(|| format!("{lcsc}: JLCPCB's answer is not JSON"))?;
-    listing(&answer, lcsc)
-}
-
 /// Pads of the assembled parts: the solder joints JLCPCB charges for (INFERRED count).
 fn joints(pcb: &Path, bom: &[BomLine]) -> Result<u64> {
     let placed: BTreeSet<&str> = bom.iter().flat_map(|l| l.1.iter().map(String::as_str)).collect();
@@ -193,14 +121,53 @@ fn joints(pcb: &Path, bom: &[BomLine]) -> Result<u64> {
         .count() as u64)
 }
 
-/// The `cost` stage: writes `<fab>/cost.json` and prints a summary.
-pub fn run(project_dir: &Path, name: &str, fab: &Path, boards: u64, assembled: u64) -> Result<Value> {
+/// The MPN a BOM line should carry: the `MPN` field of its parts in the circuit. None when
+/// none of them has one; an error when they disagree.
+pub fn line_mpn(line: &BomLine, c: &Circuit) -> std::result::Result<Option<String>, String> {
+    let mut mpns: Vec<&str> = c.parts.iter().filter(|p| line.1.contains(&p.reference)).filter_map(|p| p.field("MPN")).collect();
+    mpns.sort();
+    mpns.dedup();
+    match mpns[..] {
+        [] => Ok(None),
+        [one] => Ok(Some(one.to_string())),
+        _ => Err(format!("{} ({}): its parts name different MPNs: {}", line.2, line.1.join(","), mpns.join(", "))),
+    }
+}
+
+/// The PARTS gate, per BOM line: JLCPCB's MPN for the LCSC code must be the circuit's MPN
+/// (a typo in an LCSC code lands on some other part), and JLCPCB must stock what the order
+/// takes (parts for the assembled boards + attrition, at least the minimum).
+/// (failures, warnings); a line whose parts have no MPN is a warning: nothing to check.
+pub fn parts_gate(bom: &[BomLine], listings: &[Listing], mpns: &[std::result::Result<Option<String>, String>], assembled: u64) -> (Vec<String>, Vec<String>) {
+    let (mut fail, mut warn) = (vec![], vec![]);
+    for (((_, refs, lcsc), l), mpn) in bom.iter().zip(listings).zip(mpns) {
+        let at = format!("{lcsc} ({})", refs.join(","));
+        match mpn {
+            Err(e) => fail.push(e.clone()),
+            Ok(None) => warn.push(format!("{at}: no MPN in the circuit to check JLCPCB's \"{}\" against (add .mpn(...))", l.mpn)),
+            Ok(Some(m)) if !mpn_matches(m, &l.mpn) => fail.push(format!(
+                "{at}: the circuit says MPN \"{m}\" but JLCPCB lists {lcsc} as \"{}\" ({}, {}): wrong LCSC code or wrong MPN",
+                l.mpn, l.manufacturer, l.package
+            )),
+            Ok(Some(_)) => {}
+        }
+        let qty = l.order_qty(refs.len() as u64 * assembled);
+        if l.stock < qty {
+            fail.push(format!("{at}: JLCPCB stocks {} but the order takes {qty}", l.stock));
+        }
+    }
+    (fail, warn)
+}
+
+/// The `cost` stage: writes `<fab>/cost.json`, prints a summary and the PARTS gate.
+/// Ok(false) when the gate fails (cost.json is still written).
+pub fn run(project_dir: &Path, name: &str, fab: &Path, circuit: &Circuit, boards: u64, assembled: u64, jlc: &Jlc) -> Result<bool> {
     let bom_path = fab.join(format!("{name}-bom.csv"));
     if !bom_path.exists() {
         bail!("no {}; run the fab stage first", bom_path.display());
     }
     let bom = read_bom(&bom_path)?;
-    let listings = bom.iter().map(|l| fetch(&l.2)).collect::<Result<Vec<_>>>()?;
+    let listings = bom.iter().map(|l| jlc.get(&l.2)).collect::<Result<Vec<_>>>()?;
     let j = joints(&project_dir.join(format!("{name}.kicad_pcb")), &bom)?;
     let report = price(&bom, &listings, j, boards, assembled, &crate::schematic::today());
     std::fs::write(fab.join("cost.json"), serde_json::to_string_pretty(&report)? + "\n")?;
@@ -214,12 +181,29 @@ pub fn run(project_dir: &Path, name: &str, fab: &Path, boards: u64, assembled: u
     if !short.is_empty() {
         println!("   SHORT: not enough JLCPCB stock for {}", short.join(", "));
     }
-    Ok(report)
+    let mpns: Vec<_> = bom.iter().map(|l| line_mpn(l, circuit)).collect();
+    let (fail, warn) = parts_gate(&bom, &listings, &mpns, assembled);
+    for w in &warn {
+        println!("   unchecked: {w}");
+    }
+    for f in &fail {
+        println!("   {f}");
+    }
+    let checked = mpns.iter().filter(|m| matches!(m, Ok(Some(_)))).count();
+    println!(
+        "== PARTS: {} ({} lines; {checked} MPNs checked against JLCPCB's listing, {} without an MPN; stock checked for {assembled} assembled)",
+        if fail.is_empty() { "PASS" } else { "FAIL" },
+        bom.len(),
+        warn.len()
+    );
+    Ok(fail.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::jlc::listing;
 
     fn answer(code: &str, typ: &str, pref: bool) -> Value {
         json!({"code": 200, "data": {"componentPageInfo": {"list": [
@@ -273,5 +257,42 @@ mod tests {
         assert_eq!(v["alone_in_a_parcel_usd"]["vat"], 0.0, "under the $75 line");
         assert_eq!(v["lines"][1]["order_qty"], 20);
         assert_eq!(v["lines"][0]["short"], false);
+    }
+
+    #[test]
+    fn parts_gate_checks_mpn_and_stock() {
+        let bom: Vec<BomLine> = vec![
+            ("ESP32".into(), vec!["U1".into()], "C2913202".into()),
+            ("10k".into(), vec!["R1".into(), "R2".into()], "C17414".into()),
+            ("x".into(), vec!["D1".into()], "C1".into()),
+        ];
+        let l = |mpn: &str, stock: u64| Listing {
+            mpn: mpn.into(),
+            stock,
+            minimum: 20,
+            attrition: 10,
+            tiers: vec![(1, None, 0.1)],
+            ..Default::default()
+        };
+        let mpns = vec![Ok(Some("ESP32-S3-WROOM-1-N16R8".to_string())), Ok(Some("0805W8F1002T5E".to_string())), Ok(None)];
+        let good = [l("ESP32-S3-WROOM-1-N16R8", 20), l("0805W8F1002T5E", 1000), l("whatever", 1000)];
+        let (fail, warn) = parts_gate(&bom, &good, &mpns, 2);
+        assert!(fail.is_empty(), "{fail:?}");
+        assert_eq!(warn.len(), 1, "a line without an MPN is a warning");
+        assert!(warn[0].starts_with("C1 (D1)"));
+
+        // a typo in the LCSC code lands on another part: JLCPCB's MPN differs
+        let typo = [l("ESP32-S3-WROOM-1-N8", 1000), l("0805W8F1002T5E", 1000), l("whatever", 1000)];
+        let (fail, _) = parts_gate(&bom, &typo, &mpns, 2);
+        assert_eq!(fail.len(), 1);
+        assert!(fail[0].contains("C2913202 (U1)") && fail[0].contains("\"ESP32-S3-WROOM-1-N8\""), "{fail:?}");
+
+        // stock: 2 boards x 2 resistors + 10 attrition = 14, at least the minimum 20
+        let short = [l("ESP32-S3-WROOM-1-N16R8", 1000), l("0805W8F1002T5E", 19), l("whatever", 1000)];
+        let (fail, _) = parts_gate(&bom, &short, &mpns, 2);
+        assert_eq!(fail, vec!["C17414 (R1,R2): JLCPCB stocks 19 but the order takes 20".to_string()]);
+
+        let (fail, _) = parts_gate(&bom, &good, &[Err("disagree".into()), Ok(None), Ok(None)], 2);
+        assert_eq!(fail, vec!["disagree".to_string()]);
     }
 }

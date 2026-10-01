@@ -20,32 +20,36 @@ const C0805: &str = "Capacitor_SMD:C_0805_2012Metric";
 const LED0805: &str = "LED_SMD:LED_0805_2012Metric";
 const TP: &str = "TestPoint:TestPoint_Pad_D1.5mm";
 
-/// LCSC part numbers (JLCPCB Basic unless noted); see research/2026-09-29-parts-starter.md
-fn lcsc(value: &str) -> &'static str {
+/// (LCSC part number, MPN), all JLCPCB Basic; see research/2026-09-29-parts-starter.md.
+/// MPNs copied from JLCPCB's listing of each code (`pcb parts show`, 2026-10-01); the
+/// cost stage's PARTS gate checks them against the live listing.
+fn lcsc(value: &str) -> (&'static str, &'static str) {
     match value {
-        "10k" => "C17414",
-        "5.1k" => "C27834",
-        "4.7k" => "C17673",
-        "1k" => "C17513",
-        "2.2k" => "C17520",
-        "100n" => "C49678",
-        "1u" => "C28323",
-        "10u" => "C15850",
-        "22u" => "C45783",
+        "10k" => ("C17414", "0805W8F1002T5E"),
+        "5.1k" => ("C27834", "0805W8F5101T5E"),
+        "4.7k" => ("C17673", "0805W8F4701T5E"),
+        "1k" => ("C17513", "0805W8F1001T5E"),
+        "2.2k" => ("C17520", "0805W8F2201T5E"),
+        "100n" => ("C49678", "CC0805KRX7R9BB104"),
+        "1u" => ("C28323", "CL21B105KBFNNNE"),
+        "10u" => ("C15850", "CL21A106KAYNNNE"),
+        "22u" => ("C45783", "CL21A226MAQNNNE"),
         _ => panic!("no LCSC part for {value}"),
     }
 }
 
 /// An 0805 resistor from net `a` (pin 1) to net `b` (pin 2).
 fn r(c: &mut Circuit, reference: &str, value: &str, a: NetId, b: NetId, block: &str) {
-    let r = c.part(reference, "Device:R", value, R0805).lcsc(lcsc(value)).block(block).rot(90).id();
+    let (code, mpn) = lcsc(value);
+    let r = c.part(reference, "Device:R", value, R0805).lcsc(code).mpn(mpn).block(block).rot(90).id();
     c.connect(a, r, &["1"]);
     c.connect(b, r, &["2"]);
 }
 
 /// An 0805 capacitor from net `a` (pin 1) to net `b` (pin 2).
 fn cap(c: &mut Circuit, reference: &str, value: &str, a: NetId, b: NetId, block: &str) {
-    let k = c.part(reference, "Device:C", value, C0805).lcsc(lcsc(value)).block(block).id();
+    let (code, mpn) = lcsc(value);
+    let k = c.part(reference, "Device:C", value, C0805).lcsc(code).mpn(mpn).block(block).id();
     c.connect(a, k, &["1"]);
     c.connect(b, k, &["2"]);
 }
@@ -132,7 +136,7 @@ pub fn build() -> Circuit {
     let pwr_led = c.net("PWR_LED");
     // green Vf is up to 3.1 V, too close to 3.3 V: feed it from 5 V (about 2 mA)
     r(&mut c, "R3", "1k", v5, pwr_led, reg);
-    let d1 = c.part("D1", "Device:LED", "green", LED0805).lcsc("C2297").block(reg).id();
+    let d1 = c.part("D1", "Device:LED", "green", LED0805).lcsc("C2297").mpn("KT-0805G").block(reg).id();
     c.connect(pwr_led, d1, &["A"]);
     c.connect(gnd, d1, &["K"]);
 
@@ -155,12 +159,12 @@ pub fn build() -> Circuit {
     c.connect(en, u1, &["EN"]);
     r(&mut c, "R4", "10k", v3, en, mcu); // EN pull-up
     cap(&mut c, "C5", "1u", en, gnd, mcu); // EN power-on delay (Espressif: 10k/1uF)
-    let sw1 = c.part("SW1", "Switch:SW_Push", "RESET", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A").lcsc("C318884").block("Buttons").id();
+    let sw1 = c.part("SW1", "Switch:SW_Push", "RESET", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A").lcsc("C318884").mpn("TS-1187A-B-A-B").block("Buttons").id();
     c.connect(en, sw1, &["1"]);
     c.connect(gnd, sw1, &["2"]);
     c.connect(boot, u1, &["IO0"]);
     r(&mut c, "R5", "10k", v3, boot, "Buttons");
-    let sw2 = c.part("SW2", "Switch:SW_Push", "BOOT", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A").lcsc("C318884").block("Buttons").id();
+    let sw2 = c.part("SW2", "Switch:SW_Push", "BOOT", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A").lcsc("C318884").mpn("TS-1187A-B-A-B").block("Buttons").id();
     c.connect(boot, sw2, &["1"]);
     c.connect(gnd, sw2, &["2"]);
 
@@ -169,7 +173,7 @@ pub fn build() -> Circuit {
     let (status, led) = (c.net("STATUS"), c.net("STATUS_LED"));
     c.connect(status, u1, &["IO48"]);
     r(&mut c, "R6", "1k", status, led, "Status LED");
-    let d2 = c.part("D2", "Device:LED", "red", LED0805).lcsc("C84256").block("Status LED").id();
+    let d2 = c.part("D2", "Device:LED", "red", LED0805).lcsc("C84256").mpn("NCD0805R1").block("Status LED").id();
     c.connect(led, d2, &["A"]);
     c.connect(gnd, d2, &["K"]);
 
