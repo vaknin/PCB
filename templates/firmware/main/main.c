@@ -8,6 +8,7 @@
 #include <string.h>
 #include "board.h"
 #include "board_pins.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "provision.h"
@@ -16,14 +17,26 @@
 #include "simcmd.h"
 #endif
 
-static selftest_result_t example(char *detail, size_t len)
+// The status light: on for a second (Wokwi checks the pin on SELFTEST_LOOK; at bring-up the
+// owner looks at it). QEMU has no GPIO, so it skips there.
+static selftest_result_t status_led(char *detail, size_t len)
 {
-    snprintf(detail, len, "replace me");
-    return SELFTEST_SKIP;
+    if (BOARD_IS_QEMU) {
+        snprintf(detail, len, "no GPIO in QEMU");
+        return SELFTEST_SKIP;
+    }
+    gpio_reset_pin(PIN_STATUS_LED);
+    gpio_set_direction(PIN_STATUS_LED, GPIO_MODE_OUTPUT);
+    gpio_set_level(PIN_STATUS_LED, 1);
+    printf("SELFTEST_LOOK status_led on\n");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    gpio_set_level(PIN_STATUS_LED, 0);
+    snprintf(detail, len, "on for 1 s");
+    return SELFTEST_PASS;
 }
 
 static const selftest_case_t cases[] = {
-    {"example", example},
+    {"status_led", status_led},
 };
 
 static void run_selftests(void)
