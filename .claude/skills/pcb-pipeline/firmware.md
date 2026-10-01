@@ -16,6 +16,10 @@ built this way: D-025 in `DECISIONS.md`, `docs/plan.md`.
   `simcmd_button()` when `BOARD_IS_QEMU`. Both `boards/starter/firmware/main/main.c` and
   `templates/firmware/main/main.c` show the wiring (`simcmd_start`, then `simcmd_serve` in the
   console's line handler).
+- Self-test output lines are fixed (`firmware/components/selftest`): `SELFTEST {json}` per
+  test, `SELFTEST_DONE`, `SELFTEST_BUSY`, and two prompts for the person at the board (devctl
+  shows them; Wokwi steps wait on them): `SELFTEST_LOOK <what>` (look or listen: a light, a
+  beep) and `SELFTEST_PRESS "<button>"`. Don't invent other kinds; nothing reads them.
 - Put logic in files with no hardware calls, behind small interfaces, so the laptop tests
   reach it.
 
@@ -57,9 +61,11 @@ comments in `templates/board.toml`.
   capture-clip's update and rollback images) are its own, and its `build-qemu` is the one the
   stage just built, so nothing is rebuilt.
 - Results go to `firmware/sim.json` (`scenarios`, logs in `firmware/build-qemu/scenarios/`) and
-  the review page's Scenarios table. A readiness proof with `evidence = "scenario:<name>"`
-  needs `how = "simulated"` and is red while that scenario fails or has no result
-  (`rounds.md`).
+  the review page's Scenarios table.
+- A scenario that shows a requirement is met gets linked under that `[[requirement]]`:
+  `[[requirement.proof]] how = "simulated"`, `evidence = "scenario:<name>"`. It is red while
+  that scenario fails or has no result (`rounds.md`). Add it even while other requirements have
+  no proof yet: the readiness page is red until each has one, so a partial set only helps.
 - Firmware that waits for a simulated button must keep reading the console, or the `SIM PRESS`
   never arrives: run such work (a console `SELFTEST`, say) in its own task, as the starter does.
 

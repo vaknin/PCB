@@ -23,9 +23,10 @@ stubs); `scripts/fr-violations/run.sh <board.dsn>` lists them. KiCad's DRC is th
 
 ## When routing fails
 How the stage escalates on its own: `docs/pipeline.md` "When routing fails".
-- If the route stage warns that every order left something unrouted, `check` will fail. Route
-  more orders or give the router room (placement, track widths).
-- Read `route/failure.json` (also printed). Each open DRC item has its parts, a position in
+- If the route stage warns that every order left something unrouted, `check` will fail. Give
+  the router room (placement, track widths); more orders help only when `failure.json` shows
+  some orders failing, not all.
+- Read `boards/<name>/kicad/route/failure.json` (also printed). Each open DRC item has its parts, a position in
   layout mm, "N of M orders" and a suggested fix. All orders hit = placement or rules; some =
   routing luck. Fix the placement or rules. Don't raise `--tries` for a fault that hits every
   order: more orders can't fix it.

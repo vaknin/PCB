@@ -1,0 +1,18 @@
+[
+ {"query": "i've got an idea for a small gadget: a fridge-door thermometer that pings my phone if the door's left open. could we make our own board for it?", "should_trigger": true},
+ {"query": "what does JLCPCB charge for the extended parts on the starter board, and is there a basic-part alternative for the usb-c connector?", "should_trigger": true},
+ {"query": "the DRC report for capture-clip shows clearance violations near the antenna keepout, what's going on", "should_trigger": true},
+ {"query": "make the enclosure for my esp32 board 2mm taller so the battery fits, and check it still fits the pcb", "should_trigger": true},
+ {"query": "run the qemu scenarios for the starter and tell me if the selftest one still passes", "should_trigger": true},
+ {"query": "find me an lcsc part number for a 0805 10k resistor that's a jlc basic part", "should_trigger": true},
+ {"query": "is the starter board ready to order? what's still red on the readiness page", "should_trigger": true},
+ {"query": "can you flash the latest firmware to the board plugged into usb and run devctl selftest", "should_trigger": true},
+ {"query": "add an i2c light sensor to my board.toml pin map and wire it in circuit.rs", "should_trigger": true},
+ {"query": "my raspberry pi 5 won't boot from the nvme ssd after the latest firmware update, how do i fix the eeprom boot order", "should_trigger": false},
+ {"query": "write a micropython script for my esp32 devkit that reads a dht22 on gpio4 and prints the temperature every 10 seconds", "should_trigger": false},
+ {"query": "i want to 3d print a simple wall bracket for my router, 120mm wide, can you make an openscad file", "should_trigger": false},
+ {"query": "my soldering iron tip keeps oxidizing and won't wet, what am i doing wrong", "should_trigger": false},
+ {"query": "explain how a buck converter works compared to a linear regulator, I'm trying to understand power supplies", "should_trigger": false},
+ {"query": "set up esphome on home assistant for the sonoff switch i bought so i can control it from my phone", "should_trigger": false},
+ {"query": "my laptop's usb-c charging port is loose, is it worth repairing or should i buy a dock", "should_trigger": false}
+]

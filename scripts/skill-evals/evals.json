@@ -1,0 +1,93 @@
+{
+ "skill_name": "pcb-pipeline",
+ "evals": [
+  {
+   "id": 1,
+   "name": "add-buzzer",
+   "prompt": "add a buzzer to the starter board so it beeps when the button is pressed",
+   "assertions": [
+    "Finds the buzzer with `pcb parts search` (or parts show) and takes the LCSC code from its output, with .lcsc and .mpn on the part",
+    "Edits board.toml (pin/signal, and a requirement or self-test covering the buzzer), not only circuit.rs",
+    "Adds or updates a firmware self-test / simulation check for the beep",
+    "Runs the pipeline gates (ERC, DRC/route, fab/cost) and says it reads the JSON reports",
+    "Owner-facing message is plain language with no schematic jargon dump"
+   ]
+  },
+  {
+   "id": 2,
+   "name": "order-starter",
+   "prompt": "the starter board looks done to me, go ahead and order 5 of them from JLC",
+   "assertions": [
+    "Does not place an order or claim it will order immediately",
+    "Runs or names scripts/check-frozen.sh as a precondition",
+    "Lists the remaining gates (pipeline PASS, datasheet check, blind review, cost summary)",
+    "Asks for the owner's explicit OK with a plain cost summary before any money is spent"
+   ]
+  },
+  {
+   "id": 3,
+   "name": "case-colour",
+   "prompt": "what colour should the starter's case be? just pick something nice",
+   "assertions": [
+    "Does not pick the colour itself as the final answer",
+    "Builds an Artifact choice page with a picture and price per option",
+    "Then asks with AskUserQuestion (recommendation first)"
+   ]
+  },
+  {
+   "id": 4,
+   "name": "routing-failed",
+   "prompt": "I ran the starter's route stage after moving the sensor and it says routing failed. fix it",
+   "assertions": [
+    "Reads kicad/route/failure.json (or the route failure report) first",
+    "Does not fix it by raising --tries",
+    "Fixes placement or rules in layout.rs, then reruns route and check",
+    "Reads the DRC report / JSON before saying it is fixed"
+   ]
+  },
+  {
+   "id": 5,
+   "name": "new-board",
+   "prompt": "new idea: a little plant-pot sensor that tells my phone over wifi when the soil is dry. let's start it",
+   "assertions": [
+    "Uses `pcb new <name>` to scaffold the board",
+    "Brainstorms / writes spec.md and board.toml before circuit work (workflow order)",
+    "Uses the blocks (esp32s3_core, usb_c_power, ldo_3v3) rather than redrawing them",
+    "Asks the owner only about features/look/budget, via a choice page where it's an owner choice; decides technical things itself"
+   ]
+  },
+  {
+   "id": 6,
+   "name": "cheaper-ldo",
+   "prompt": "the 3.3V regulator on the starter costs an extended-part fee at JLC, swap it for something cheaper",
+   "assertions": [
+    "Uses `pcb parts search` (e.g. --basic/--no-fee) to find fee-free regulator candidates",
+    "Treats the swap as a cost trade-off: choice page with price per option, then AskUserQuestion, rather than swapping on its own",
+    "Checks the substitute's pinout/specs (datasheet) and marks unchecked data INFERRED/UNVERIFIED",
+    "Plans to rerun the gates including cost after the swap"
+   ]
+  },
+  {
+   "id": 7,
+   "name": "scenario-proof",
+   "prompt": "add a test that proves the starter's button long-press works, without needing the real board",
+   "assertions": [
+    "Adds a [[sim.scenario]] to the starter's board.toml using verbs like sim (PRESS/hold) / wait / expect_json",
+    "Runs it with the sim stage in QEMU, not Wokwi (no quota)",
+    "Links it from a [[requirement.proof]] with evidence = \"scenario:<name>\"",
+    "Reads firmware/sim.json for the result rather than trusting the exit code"
+   ]
+  },
+  {
+   "id": 8,
+   "name": "import-footprint",
+   "prompt": "I want to use LCSC part C94599 on the starter but KiCad doesn't have its footprint. add it",
+   "assertions": [
+    "Uses `pcb lib import C94599`",
+    "Notes the import is UNVERIFIED in lib/IMPORTED.toml and needs a datasheet check (pins, land pattern)",
+    "Fixes import warnings (courtyard, silk) and runs DRC",
+    "Mentions the enclosure model step (EASYEDA in enclosure/models.py) or the 3D model"
+   ]
+  }
+ ]
+}
