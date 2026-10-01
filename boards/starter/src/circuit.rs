@@ -33,7 +33,7 @@ pub fn build() -> Circuit {
     let pwr_led = c.net("PWR_LED");
     // green Vf is up to 3.1 V, too close to 3.3 V: feed it from 5 V (about 2 mA)
     r(&mut c, "R3", "1k", v5, pwr_led, reg);
-    let d1 = c.part("D1", "Device:LED", "green", LED0805).lcsc("C2297").block(reg).id();
+    let d1 = c.part("D1", "Device:LED", "green", LED0805).lcsc("C2297").mpn("KT-0805G").block(reg).id();
     c.connect(pwr_led, d1, &["A"]);
     c.connect(gnd, d1, &["K"]);
 
@@ -46,7 +46,7 @@ pub fn build() -> Circuit {
     let (status, led) = (c.net("STATUS"), c.net("STATUS_LED"));
     c.connect(status, u1, &["IO48"]);
     r(&mut c, "R6", "1k", status, led, "Status LED");
-    let d2 = c.part("D2", "Device:LED", "red", LED0805).lcsc("C84256").block("Status LED").id();
+    let d2 = c.part("D2", "Device:LED", "red", LED0805).lcsc("C84256").mpn("NCD0805R1").block("Status LED").id();
     c.connect(led, d2, &["A"]);
     c.connect(gnd, d2, &["K"]);
 

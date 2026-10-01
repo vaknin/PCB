@@ -49,7 +49,10 @@
   },
   "router": {
     "kept_order": 2,
-    "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest",
+    "score": "fewest unrouted (other nets, then the pour net), then fewest mm thinner than the net class, then fewest vias, then shortest; of the best `drc_checks` orders, finished and checked, the first with no open DRC item, else the fewest; if none is clean, the other routed orders are checked, then `extra_rounds` of `extra_tries` new orders (D-020)",
+    "steps": [
+      "checked the best 3 of 8 routed orders"
+    ],
     "orders": [
       {
         "order": 0,
@@ -60,7 +63,8 @@
         "thinner_than_class_mm": 0.0,
         "vias": 22,
         "track_length_mm": 673.2,
-        "freerouting_clearance_violations": 20
+        "freerouting_clearance_violations": 20,
+        "drc_open": null
       },
       {
         "order": 1,
@@ -71,7 +75,8 @@
         "thinner_than_class_mm": 0.0,
         "vias": 23,
         "track_length_mm": 675.5,
-        "freerouting_clearance_violations": 20
+        "freerouting_clearance_violations": 20,
+        "drc_open": null
       },
       {
         "order": 2,
@@ -80,7 +85,8 @@
         "thinner_than_class_mm": 0.0,
         "vias": 20,
         "track_length_mm": 672.9,
-        "freerouting_clearance_violations": 20
+        "freerouting_clearance_violations": 20,
+        "drc_open": 0
       },
       {
         "order": 3,
@@ -89,7 +95,8 @@
         "thinner_than_class_mm": 0.0,
         "vias": 22,
         "track_length_mm": 681.2,
-        "freerouting_clearance_violations": 20
+        "freerouting_clearance_violations": 20,
+        "drc_open": 0
       },
       {
         "order": 4,
@@ -100,7 +107,8 @@
         "thinner_than_class_mm": 0.0,
         "vias": 19,
         "track_length_mm": 689.6,
-        "freerouting_clearance_violations": 20
+        "freerouting_clearance_violations": 20,
+        "drc_open": null
       },
       {
         "order": 5,
@@ -108,8 +116,9 @@
         "pour_net_unrouted": 1,
         "thinner_than_class_mm": 0.0,
         "vias": 23,
-        "track_length_mm": 700.5,
-        "freerouting_clearance_violations": 20
+        "track_length_mm": 699.3,
+        "freerouting_clearance_violations": 20,
+        "drc_open": null
       },
       {
         "order": 6,
@@ -118,7 +127,8 @@
         "thinner_than_class_mm": 0.0,
         "vias": 27,
         "track_length_mm": 721.3,
-        "freerouting_clearance_violations": 20
+        "freerouting_clearance_violations": 20,
+        "drc_open": null
       },
       {
         "order": 7,
@@ -127,7 +137,8 @@
         "thinner_than_class_mm": 0.0,
         "vias": 20,
         "track_length_mm": 694.6,
-        "freerouting_clearance_violations": 20
+        "freerouting_clearance_violations": 20,
+        "drc_open": 0
       }
     ]
   }

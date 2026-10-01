@@ -15,6 +15,7 @@ pub mod failure;
 pub mod footprint;
 pub mod gates;
 pub mod geom;
+pub mod jlc;
 pub mod layout;
 pub mod pcb;
 pub mod project;

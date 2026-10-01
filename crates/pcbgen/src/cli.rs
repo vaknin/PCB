@@ -1,5 +1,5 @@
 //! Pipeline driver, called by each board's `main`:
-//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [case] [cost] [review] [--out DIR] [--tries N] [--wokwi]`
+//! `cargo run --release -p <board> -- [sch] [pcb] [route] [check] [fab] [fw] [sim] [case] [cost] [review] [--out DIR] [--tries N] [--wokwi] [--fresh]`
 //!
 //! Stages run in this order whatever order they are named in (default: all). Generated
 //! KiCad files go to `<board>/kicad/` and fab files to `<board>/fab/`; `--out DIR` puts
@@ -11,7 +11,8 @@
 //! files (`diagram.json`, `wokwi.toml`, the scenario) when a pin has a `sim` part.
 //! `sim` (the firmware in QEMU, plus Wokwi with `--wokwi`; D-025), `case` (the printed case
 //! and its fit check, `<board>/case/`; D-025 Phase B), `cost` (live JLCPCB prices, needs the
-//! network) and `review` (the owner's review page, `<board>/review/index.html`, and the readiness page
+//! network; it also runs the PARTS gate, and `--fresh` skips the 1-day JLCPCB answer
+//! cache) and `review` (the owner's review page, `<board>/review/index.html`, and the readiness page
 //! `readiness.html` beside it) run only when
 //! named.
 
@@ -53,6 +54,7 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
     let mut base = board.dir.clone();
     let mut tries: Option<u32> = None;
     let mut wokwi = false;
+    let mut fresh = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -65,8 +67,9 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
                 None => bail!("--tries needs a number of at least 1"),
             },
             "--wokwi" => wokwi = true,
+            "--fresh" => fresh = true,
             "-h" | "--help" => {
-                println!("usage: <board> [{}] [--out DIR] [--tries N] [--wokwi]", STAGES.join("] ["));
+                println!("usage: <board> [{}] [--out DIR] [--tries N] [--wokwi] [--fresh]", STAGES.join("] ["));
                 return Ok(true);
             }
             s if STAGES.contains(&s) => stages.push(STAGES.iter().find(|x| **x == s).unwrap()),
@@ -186,7 +189,9 @@ fn run(board: &Board, args: &[String]) -> Result<bool> {
     }
     if want("cost") {
         let (boards, assembled) = board_file.as_ref().map_or((5, 2), |b| (b.order.boards, b.order.assembled));
-        cost::run(&out, &name, &base.join("fab"), boards, assembled)?;
+        if !cost::run(&out, &name, &base.join("fab"), &circuit, boards, assembled, &crate::jlc::Jlc { fresh })? {
+            return Ok(false);
+        }
     }
     if want("review") {
         let inputs = review::Inputs { dir: &board.dir, base: &base, circuit: &circuit, board_file: board_file.as_ref(), waivers: &layout.waivers };

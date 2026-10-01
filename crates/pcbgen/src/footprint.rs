@@ -19,9 +19,14 @@ use crate::layout::Side;
 use crate::sexpr::{Kw, Sexp, parse};
 use crate::{node, uid};
 
+/// KiCad's footprint libraries: `$KICAD10_FOOTPRINT_DIR`, else /usr/share/kicad/footprints.
+pub fn kicad_dir() -> String {
+    std::env::var("KICAD10_FOOTPRINT_DIR").unwrap_or("/usr/share/kicad/footprints".into())
+}
+
 /// Library name → directory, from the project's fp-lib-table.
 pub fn lib_paths(project_dir: &Path) -> Result<HashMap<String, PathBuf>> {
-    let fp_dir = std::env::var("KICAD10_FOOTPRINT_DIR").unwrap_or("/usr/share/kicad/footprints".into());
+    let fp_dir = kicad_dir();
     let table = parse(&std::fs::read_to_string(project_dir.join("fp-lib-table"))?)?;
     Ok(table
         .find_all("lib")

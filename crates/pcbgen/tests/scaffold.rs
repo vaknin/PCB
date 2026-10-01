@@ -36,6 +36,13 @@ fn new_board() {
     assert_eq!(boardfile::problems(&bf, &c, Some(&spec)), Vec::<String>::new());
     assert!(c.check().is_empty(), "{:?}", c.check());
 
+    // every assembled part has an LCSC number and an MPN (the cost stage's PARTS gate)
+    for p in c.parts.iter().filter(|p| p.in_bom) {
+        for key in ["LCSC", "MPN"] {
+            assert!(p.fields.iter().any(|(k, v)| k == key && !v.is_empty()), "{} has no {key}", p.reference);
+        }
+    }
+
     // every part placed, nothing placed that isn't a part
     let parts: BTreeSet<String> = c.parts.iter().map(|p| p.reference.clone()).collect();
     let placed: BTreeSet<String> = layout::layout().spec.places.iter().map(|(r, _)| r.clone()).collect();

@@ -28,7 +28,7 @@ pub fn build() -> Circuit {
     blocks::ldo_3v3(&mut c, &Ldo3v3::new(v5, v3, gnd));
     let pwr_led = c.net("PWR_LED");
     resistor(&mut c, "R3", "1k", v5, pwr_led, reg);
-    let d1 = c.part("D1", "Device:LED", "green", LED0805).lcsc("C2297").block(reg).id();
+    let d1 = c.part("D1", "Device:LED", "green", LED0805).lcsc("C2297").mpn("KT-0805G").block(reg).id();
     c.connect(pwr_led, d1, &["A"]);
     c.connect(gnd, d1, &["K"]);
 
@@ -40,7 +40,7 @@ pub fn build() -> Circuit {
     let (status, led) = (c.net("STATUS"), c.net("STATUS_LED"));
     c.connect(status, u1, &["IO48"]);
     resistor(&mut c, "R6", "1k", status, led, "Status LED");
-    let d2 = c.part("D2", "Device:LED", "red", LED0805).lcsc("C84256").block("Status LED").id();
+    let d2 = c.part("D2", "Device:LED", "red", LED0805).lcsc("C84256").mpn("NCD0805R1").block("Status LED").id();
     c.connect(led, d2, &["A"]);
     c.connect(gnd, d2, &["K"]);
 

@@ -22,19 +22,21 @@ pub const R0805: &str = "Resistor_SMD:R_0805_2012Metric";
 pub const C0805: &str = "Capacitor_SMD:C_0805_2012Metric";
 pub const LED0805: &str = "LED_SMD:LED_0805_2012Metric";
 
-/// LCSC numbers of the 0805 resistors and capacitors the starter uses, all JLCPCB Basic
-/// (research/2026-09-29-parts-starter.md §10).
-pub fn lcsc_0805(value: &str) -> Option<&'static str> {
+/// (LCSC number, MPN) of the 0805 resistors and capacitors the starter uses, all JLCPCB Basic
+/// (research/2026-09-29-parts-starter.md §10). MPNs copied from JLCPCB's listing of each code
+/// (`pcb parts show`, 2026-10-01); the cost stage's PARTS gate checks them against the live
+/// listing.
+pub fn lcsc_0805(value: &str) -> Option<(&'static str, &'static str)> {
     Some(match value {
-        "10k" => "C17414",
-        "5.1k" => "C27834",
-        "4.7k" => "C17673",
-        "1k" => "C17513",
-        "2.2k" => "C17520",
-        "100n" => "C49678",
-        "1u" => "C28323",
-        "10u" => "C15850",
-        "22u" => "C45783",
+        "10k" => ("C17414", "0805W8F1002T5E"),
+        "5.1k" => ("C27834", "0805W8F5101T5E"),
+        "4.7k" => ("C17673", "0805W8F4701T5E"),
+        "1k" => ("C17513", "0805W8F1001T5E"),
+        "2.2k" => ("C17520", "0805W8F2201T5E"),
+        "100n" => ("C49678", "CC0805KRX7R9BB104"),
+        "1u" => ("C28323", "CL21B105KBFNNNE"),
+        "10u" => ("C15850", "CL21A106KAYNNNE"),
+        "22u" => ("C45783", "CL21A226MAQNNNE"),
         _ => return None,
     })
 }
@@ -43,8 +45,8 @@ pub fn lcsc_0805(value: &str) -> Option<&'static str> {
 /// with no LCSC number in [`lcsc_0805`].
 #[track_caller]
 pub fn resistor(c: &mut Circuit, reference: &str, value: &str, a: NetId, b: NetId, block: &str) -> PartId {
-    let lcsc = lcsc_0805(value).unwrap_or_else(|| panic!("{reference}: no LCSC part for {value}"));
-    let r = c.part(reference, "Device:R", value, R0805).lcsc(lcsc).block(block).rot(90).id();
+    let (lcsc, mpn) = lcsc_0805(value).unwrap_or_else(|| panic!("{reference}: no LCSC part for {value}"));
+    let r = c.part(reference, "Device:R", value, R0805).lcsc(lcsc).mpn(mpn).block(block).rot(90).id();
     c.connect(a, r, &["1"]);
     c.connect(b, r, &["2"]);
     r
@@ -54,8 +56,8 @@ pub fn resistor(c: &mut Circuit, reference: &str, value: &str, a: NetId, b: NetI
 /// number in [`lcsc_0805`].
 #[track_caller]
 pub fn capacitor(c: &mut Circuit, reference: &str, value: &str, a: NetId, b: NetId, block: &str) -> PartId {
-    let lcsc = lcsc_0805(value).unwrap_or_else(|| panic!("{reference}: no LCSC part for {value}"));
-    let k = c.part(reference, "Device:C", value, C0805).lcsc(lcsc).block(block).id();
+    let (lcsc, mpn) = lcsc_0805(value).unwrap_or_else(|| panic!("{reference}: no LCSC part for {value}"));
+    let k = c.part(reference, "Device:C", value, C0805).lcsc(lcsc).mpn(mpn).block(block).id();
     c.connect(a, k, &["1"]);
     c.connect(b, k, &["2"]);
     k
@@ -319,7 +321,7 @@ pub struct Button {
 impl Button {
     /// XKB TS-1187A, 5.1 x 5.1 mm SMD (the starter's two buttons; JLCPCB Basic).
     pub const fn ts1187a(reference: &'static str, value: &'static str) -> Button {
-        Button { reference, value, footprint: "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", lcsc: "C318884", mpn: None, block: "Buttons" }
+        Button { reference, value, footprint: "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", lcsc: "C318884", mpn: Some("TS-1187A-B-A-B"), block: "Buttons" }
     }
 }
 

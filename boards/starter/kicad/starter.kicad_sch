@@ -6,7 +6,7 @@
 	(paper "A2")
 	(title_block
 		(title "ESP32-S3 starter board")
-		(date "2026-09-29")
+		(date "2026-10-01")
 		(rev "0")
 		(comment 1 "Generated from code by pcbgen; do not edit by hand")
 	)
@@ -6072,6 +6072,17 @@
 				)
 			)
 		)
+		(property "MPN" "CC0805KRX7R9BB104"
+			(at 287.02 86.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "8e8b892b-6560-5223-815c-c07457435e54")
 		)
@@ -6379,6 +6390,17 @@
 			)
 		)
 		(property "LCSC" "C2297"
+			(at 91.44 139.7 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "KT-0805G"
 			(at 91.44 139.7 0)
 			(hide yes)
 			(show_name no)
@@ -7013,6 +7035,17 @@
 				)
 			)
 		)
+		(property "MPN" "CL21A226MAQNNNE"
+			(at 149.86 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "b4e2f497-3b49-5f56-9b2d-cc3ecc648c0f")
 		)
@@ -7178,6 +7211,17 @@
 				)
 			)
 		)
+		(property "MPN" "0805W8F4701T5E"
+			(at 284.48 121.92 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "35b57769-fc0e-5174-8cab-b367641a5c2f")
 		)
@@ -7269,6 +7313,17 @@
 				)
 			)
 		)
+		(property "MPN" "CL21B105KBFNNNE"
+			(at 149.86 203.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "3be528d3-50a0-561b-8ce6-0d9cf517f260")
 		)
@@ -7348,6 +7403,17 @@
 			)
 		)
 		(property "LCSC" "C318884"
+			(at 200.66 35.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "TS-1187A-B-A-B"
 			(at 200.66 35.56 0)
 			(hide yes)
 			(show_name no)
@@ -8445,6 +8511,17 @@
 				)
 			)
 		)
+		(property "MPN" "TS-1187A-B-A-B"
+			(at 200.66 63.5 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "5ddd9b48-0d46-5920-a3b8-ddefb45e4f44")
 		)
@@ -8524,6 +8601,17 @@
 			)
 		)
 		(property "LCSC" "C17414"
+			(at 200.66 48.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "0805W8F1002T5E"
 			(at 200.66 48.26 0)
 			(hide yes)
 			(show_name no)
@@ -8615,6 +8703,17 @@
 			)
 		)
 		(property "LCSC" "C15850"
+			(at 93.98 71.12 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "CL21A106KAYNNNE"
 			(at 93.98 71.12 0)
 			(hide yes)
 			(show_name no)
@@ -9054,6 +9153,17 @@
 				)
 			)
 		)
+		(property "MPN" "0805W8F1001T5E"
+			(at 91.44 124.46 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "b0edadfa-2ff4-5dc4-a3a4-e468bb0f39a9")
 		)
@@ -9211,6 +9321,17 @@
 			)
 		)
 		(property "LCSC" "C49678"
+			(at 149.86 157.48 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "CC0805KRX7R9BB104"
 			(at 149.86 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -9614,6 +9735,17 @@
 				)
 			)
 		)
+		(property "MPN" "0805W8F1002T5E"
+			(at 149.86 180.34 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "bd43e0ac-0d08-5575-8e03-49cbed926f71")
 		)
@@ -9943,6 +10075,17 @@
 			)
 		)
 		(property "LCSC" "C17513"
+			(at 241.3 35.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "0805W8F1001T5E"
 			(at 241.3 35.56 0)
 			(hide yes)
 			(show_name no)
@@ -10350,6 +10493,17 @@
 				)
 			)
 		)
+		(property "MPN" "CL21B105KBFNNNE"
+			(at 93.98 104.14 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "ef1ad5b4-bf16-5e57-8bfe-a8feef7ec92c")
 		)
@@ -10429,6 +10583,17 @@
 			)
 		)
 		(property "LCSC" "C27834"
+			(at 43.18 104.14 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "0805W8F5101T5E"
 			(at 43.18 104.14 0)
 			(hide yes)
 			(show_name no)
@@ -10971,6 +11136,17 @@
 			)
 		)
 		(property "LCSC" "C17673"
+			(at 284.48 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "0805W8F4701T5E"
 			(at 284.48 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -12126,6 +12302,17 @@
 				)
 			)
 		)
+		(property "MPN" "0805W8F5101T5E"
+			(at 43.18 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "2dfa81fd-b366-5887-a1ae-fc7d6b832c67")
 		)
@@ -12462,6 +12649,17 @@
 			)
 		)
 		(property "LCSC" "C84256"
+			(at 238.76 48.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "NCD0805R1"
 			(at 238.76 48.26 0)
 			(hide yes)
 			(show_name no)
