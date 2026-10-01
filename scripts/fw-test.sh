@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Layer 1 of the firmware simulation (D-025): firmware logic tested on the laptop, unlimited.
 #
-#   scripts/fw-test.sh            gcc unit tests, then the ESP-IDF linux-target app
-#   scripts/fw-test.sh --gcc      only the gcc unit tests (no ESP-IDF needed)
+#   scripts/fw-test.sh            skill check, gcc unit tests, then the ESP-IDF linux-target app
+#   scripts/fw-test.sh --gcc      only the skill check and the gcc unit tests (no ESP-IDF needed)
 #   scripts/fw-test.sh --scenarios   also layer 2's scripted scenarios: every
 #                                 boards/*/firmware/sim/run.py (whole image in QEMU against a
 #                                 local mock server; a few minutes). With --gcc: gcc and these.
+#
+# skill check: scripts/skill-check.sh first (a few seconds): the pcb-pipeline skill names only
+# scripts, stages, flags and board.toml keys that exist.
 #
 # gcc tests: every firmware/test/test_*.c and boards/*/firmware/test/test_*.c is one program.
 # Its first line names the sources it tests:  // SOURCES: firmware/components/x/x.c ...
@@ -55,6 +58,11 @@ check() { # name, exit code, output file
         failed+=("$name")
     fi
 }
+
+echo "== FW-TEST (skill check)"
+if ! "$root/scripts/skill-check.sh" 2>&1 | grep -v '^   pending ' | sed 's/^/   /'; then
+    failed+=("skill check")
+fi
 
 echo "== FW-TEST (gcc, sanitizers on)"
 shopt -s nullglob

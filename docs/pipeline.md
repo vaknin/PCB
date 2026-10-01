@@ -40,6 +40,8 @@ With no stage named, `sch` to `fw` run in order; `sim`, `case`, `cost` (network)
 `scripts/draft.sh <board>`, `scripts/freeze.sh <board>` and `scripts/check-frozen.sh <board>` tag design rounds, freeze a revision (only on a draft-tagged, clean tree whose readiness page is current and has nothing red), and check before an order that nothing changed since the freeze (D-023, `docs/workflow.md`).
 `scripts/fw-test.sh [--gcc]` runs the firmware's laptop tests (see Firmware below).
 `scripts/fr-violations/run.sh <board.dsn>` lists the clearance violations Freerouting counts, with the items involved (D-018).
+`scripts/nodump.sh` prints the path of a preload library (built from `scripts/nodump.c`) that keeps a crashing QEMU from leaving a core dump or a desktop crash notice; the `sim` stage and the scenario runners use it (`LD_PRELOAD="$(scripts/nodump.sh)"`).
+`scripts/skill-check.sh` checks that the pcb-pipeline skill (`.claude/skills/pcb-pipeline/`) names only scripts, stages, flags and `board.toml` keys that exist; `scripts/fw-test.sh` runs it first.
 
 ## When routing fails (D-020)
 - **Tries more on its own.** If none of the checked orders passes DRC, the route stage checks the other routed orders (~15 s each). Then it routes one more round of 8 seeded orders (~2 min) and checks those. It is deterministic: the same board gives the same result.
@@ -79,21 +81,12 @@ With no stage named, `sch` to `fw` run in order; `sim`, `case`, `cost` (network)
 - Modified footprints go in `lib/footprints/<Lib>.pretty` (repo root); the `sch` stage points the project's fp-lib-table there for any library of that name. Currently `pcbgen:ESP32-S3-WROOM-1_EPAD-Drill0.3` (D-015).
 
 ## Firmware (D-025)
-Each board's firmware is an ESP-IDF project in `boards/<name>/firmware/` using the shared components in `firmware/components/` (`board`: boot banner, NVS, marking an update good; `selftest`; `provision`; `sensirion`). Kconfig `BOARD_TARGET` = REAL, QEMU or WOKWI; the sim builds add `sdkconfig.qemu` / `sdkconfig.wokwi` in their own build directories. Tested in four layers, open source first:
+Each board's firmware is an ESP-IDF project in `boards/<name>/firmware/` using the shared components in `firmware/components/` (`board`: boot banner, NVS, marking an update good; `selftest`; `provision`; `sensirion`; `capture`: the Capture client logic; `clip`: capture-clip's device logic). Kconfig `BOARD_TARGET` = REAL, QEMU or WOKWI; the sim builds add `sdkconfig.qemu` / `sdkconfig.wokwi` in their own build directories. Tested in four layers, open source first:
 1. **Laptop** (`scripts/fw-test.sh`, unlimited): gcc tests `firmware/test/test_*.c` and `boards/*/firmware/test/test_*.c`, each naming its sources on line 1 (`// SOURCES: ...`), runner `firmware/test/unit.h`, stubs in `firmware/test/stubs/`, ASan + UBSan. Code needing NVS or FreeRTOS: the ESP-IDF linux-target app `firmware/test/linux`. Keep hardware out of logic files so they can be tested here.
 2. **QEMU** (`sim`): the whole image, 16 MB flash + 8 MB octal PSRAM; no GPIO, I2C, I2S, USB, Wi-Fi or deep sleep, so tests needing them report `skip`.
 3. **Wokwi** (`sim --wokwi`): pins only. `board.toml` `[[pin]] sim = "button" | "led" | "led_r/g/b" | "pot"` puts a part on the pin; `[[sim.wokwi_step]]` `wait` for a console line, then `press` a button signal (`hold_ms`) or `expect` a signal at `level`. The run ends at `SELFTEST_DONE`. Firmware prints each report only after the button is released (HARDWARE_LESSONS). No real secret ever goes into Wokwi.
-4. **Hardware** with `devctl` (`crates/devctl`): `cargo run --release -p devctl -- <flash|selftest|provision|monitor> <board> [--port P] [--qemu]`. `flash` refuses any build whose `sdkconfig.json` isn't `BOARD_TARGET_REAL` and any chip that isn't an ESP32-S3 with 16 MB, then checks the boot banner against `board.toml`. `selftest` writes `bringup/selftest-<date>.json`. `provision` sends `board.toml [provision]` values (`file:<path>#<field>` from a `key=value` file, or `prompt`) only after the banner matches, and never prints them. `--qemu` runs the same against the QEMU image (results stay in `firmware/build-qemu/`).
+4. **Hardware** with `devctl` (`crates/devctl`): `cargo run --release -p devctl -- <flash|selftest|provision|monitor> <board> [--port DEV] [--qemu] [--seconds N]`. `flash` refuses any build whose `sdkconfig.json` isn't `BOARD_TARGET_REAL` and any chip that isn't an ESP32-S3 with 16 MB, then checks the boot banner against `board.toml`. `selftest` writes `bringup/selftest-<date>.json`. `provision` sends `board.toml [provision]` values (`file:<path>#<field>` from a `key=value` file, or `prompt`) only after the banner matches, and never prints them. `--qemu` runs the same against the QEMU image (results stay in `firmware/build-qemu/`). `--seconds N` ends `monitor` after N seconds.
 
-## Status (2026-09-29, starter board)
-- **All gates pass on a clean end-to-end run of the Rust pipeline:** netlist round trip, ERC 0, DRC 0 open (11 waived cosmetic silk warnings), routing 0 unrouted and no copper in keep-outs.
-- **Numbers from the latest run are in `kicad/reports/routing.json`** (with the kept router order under `router`). Freerouting's tracks differ between pipeline versions (see D-016, D-017), the design does not: 20 +3V3 cooling vias, smallest hole 0.3 mm.
-- **Fab files:** made. 8 parts have UNVERIFIED rotations (listed in `fab/README.md`).
-- **Datasheet check and blind review done** (D-014). Before any order: check rotations in JLCPCB's preview, the fab's own manufacturability check, and the owner's OK on cost.
-- **Phase 1 is closed.** The starter board is a tooling test; it will not be ordered unless the owner asks.
-- **Reviews:** `research/2026-09-29-datasheet-check.md` (every pin VERIFIED) and `research/2026-09-29-blind-review.md` (no wiring errors; cheap fixes applied in D-014). Reviewer's rough cost for 5 assembled boards: ~$105 delivered to Israel, ~$125 if the parts go over the $75 VAT line. Option A only: the module and DFN sensor can't be hand-soldered.
-
-## Next session
-1. Read `HARDWARE_LESSONS.md`, `DECISIONS.md` (open questions at the end), this file and `docs/workflow.md` (how a project runs, D-022).
-2. **Next:** `docs/plan.md` (D-025): Phase A (firmware tooling) is done; Phase B, the enclosure tooling, is next.
-3. Deferred items before any real order are listed under "Open questions" in `DECISIONS.md`.
+## Status
+- The starter board passes every gate end to end (ERC 0, DRC 0 open with waived cosmetic silk warnings, nothing unrouted). It is a tooling test and is not ordered unless the owner asks.
+- capture-clip (D-024) is in design rounds; where the plan stands is in `docs/plan.md`, open items at the end of `DECISIONS.md`.
