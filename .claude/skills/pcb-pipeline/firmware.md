@@ -9,17 +9,21 @@ built this way: D-025 in `DECISIONS.md`, `docs/plan.md`.
 - Shared components in `firmware/components/`: `board` (banner, NVS, marking an update good),
   `selftest`, `provision`, `sensirion`, `capture` (the Capture client logic), `clip`
   (capture-clip's device logic). Look in the directory for the current list.
-<!-- pending: lands with 2a/2b/2c/2d -->
-- `simcmd`: the shared parser for `SIM ...` console commands (e.g. `SIM BUTTON 1`) that stand in
-  for the pins in QEMU. Use it rather than a board's own parser.
-<!-- /pending -->
+- `simcmd`: the shared `SIM ...` console commands that stand in for pins in QEMU
+  (`SIM BUTTON 0|1`, `SIM PRESS <ms>`, a board's own verbs through `simcmd_register`). Use it
+  rather than a board's own parser. Only simulator builds (QEMU, Wokwi) compile it; a REAL build
+  gets the header alone, so wrap every use in `#if !BOARD_IS_REAL`. Read a button through
+  `simcmd_button()` when `BOARD_IS_QEMU`. Both `boards/starter/firmware/main/main.c` and
+  `templates/firmware/main/main.c` show the wiring (`simcmd_start`, then `simcmd_serve` in the
+  console's line handler).
 - Put logic in files with no hardware calls, behind small interfaces, so the laptop tests
   reach it.
 
 ## Test layers, cheapest first
 1. **Laptop** (unlimited): `scripts/fw-test.sh` (gcc tests with sanitizers, then the ESP-IDF
-   linux-target app); `--gcc` for gcc only; `--scenarios` adds every board's
-   `firmware/sim/run.py` (QEMU against a local mock server, a few minutes).
+   linux-target app); `--gcc` for gcc only; `--scenarios` adds QEMU scenarios (a few minutes): the `sim`
+   stage of every board with `[[sim.scenario]]` (its `sim.json` goes to the log directory), and
+   `firmware/sim/run.py` of the others (QEMU against a local mock server).
    A test file's first line names its sources: `// SOURCES: firmware/components/<name>/<file>.c ...`.
 2. **QEMU** (unlimited): `cargo run --release -p <board> -- sim` → `firmware/sim.json`. No GPIO,
    I2C, I2S, USB, Wi-Fi or deep sleep, so those tests report `skip`.
@@ -35,15 +39,29 @@ QEMU sometimes segfaults. The `sim` stage and `run.py` preload `scripts/nodump.s
 a crash doesn't raise a desktop crash notice: any new QEMU runner should do the same
 (`LD_PRELOAD="$(scripts/nodump.sh)"`).
 
-<!-- pending: lands with 2a/2b/2c/2d -->
 ## Scenarios in board.toml
-`[[sim.scenario]]` entries, run by the `sim` stage in QEMU. Each has steps with the verbs
-`send` (a console line), `sim` (a `SIM ...` command for a pin), `wait` (a console line),
-`expect_json` (a JSON line with given fields), `sleep_ms`, `reboot`. A board's own
-`firmware/sim/run.py` is run by the same stage through a hook. Results go to
-`firmware/sim.json` and the review page. A readiness proof with
-`evidence = "scenario:<name>"` is red if that scenario fails (`rounds.md`).
-<!-- /pending -->
+`[[sim.scenario]]` entries (`name`, `about`, optional `nic` for QEMU's Ethernet, optional
+`provision`), run by the `sim` stage in QEMU after its boot check, each on a fresh copy of the
+image. Steps (`[[sim.scenario.step]]`), one verb each: `send` (a console line), `sim` (sends
+`SIM <it>`, waits for `SIM OK <it>`), `wait` (a regex for the next line), `expect_json` (the
+next `<TAG> {json}` line whose `fields` match), `sleep_ms`, `reboot` (a power cycle on the same
+image); `timeout_ms` goes with `wait`/`expect_json` (30 s if not given). Full syntax: the
+comments in `templates/board.toml`.
+- `provision` takes literal test values only (they are in the repo), never a secret or a
+  `file:`/`prompt` reference; the BOARD.TOML gate refuses one.
+- A QEMU crash (the simulator dying from a signal, not the firmware) reruns the scenario, up
+  to 3 times; the count goes into the result as `qemu_crashes`, not as a failure. A firmware
+  crash (`Guru Meditation`, `abort()`) is a failure.
+- A board's own `firmware/sim/run.py` (for what steps can't say: a mock server, several
+  builds) is run by the same stage as a hook, without `--no-build`: its extra builds (e.g.
+  capture-clip's update and rollback images) are its own, and its `build-qemu` is the one the
+  stage just built, so nothing is rebuilt.
+- Results go to `firmware/sim.json` (`scenarios`, logs in `firmware/build-qemu/scenarios/`) and
+  the review page's Scenarios table. A readiness proof with `evidence = "scenario:<name>"`
+  needs `how = "simulated"` and is red while that scenario fails or has no result
+  (`rounds.md`).
+- Firmware that waits for a simulated button must keep reading the console, or the `SIM PRESS`
+  never arrives: run such work (a console `SELFTEST`, say) in its own task, as the starter does.
 
 ## Hardware: devctl
 ```

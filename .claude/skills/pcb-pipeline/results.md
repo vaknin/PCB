@@ -47,7 +47,8 @@ fails the stage: models live in `lib/3dmodels`.
 ## Firmware: firmware/sim.json
 The `sim` stage's results (boot, self-tests, provisioning round trip; with `--wokwi` the pin
 checks). Tests QEMU can't run report `skip`, which is not a pass.
-<!-- pending: lands with 2a/2b/2c/2d -->
-Each `[[sim.scenario]]` from `board.toml`, and the board's own `firmware/sim/run.py`, has its
-own entry in `sim.json` and on the review page.
-<!-- /pending -->
+Each `[[sim.scenario]]` from `board.toml`, and each scenario of the board's own
+`firmware/sim/run.py`, has its own entry in `sim.json` `scenarios` (`ok`, `evidence`: the lines
+it matched, `qemu_crashes`, `log`) and a row in the review page's Scenarios table. A failure's
+`evidence` names the step and what came instead; the whole console is in its `log`.
+`qemu_crashes` above 0 with `ok` true is the simulator's flakiness, not the firmware's.

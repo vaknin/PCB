@@ -40,7 +40,7 @@ This refines the phases in `docs/brief.md` (the owner's original, kept verbatim)
 
 ## 3. Firmware in simulation
 - ESP-IDF (D-009), in `boards/<name>/firmware/` (the `fw` stage copies `templates/firmware` there once), using the shared components in `firmware/components/` and the generated `board_pins.h`.
-- Open source first (D-025): the `sim` stage runs the whole image in Espressif's QEMU (free, unlimited); `sim --wokwi` also runs the pin checks in Wokwi (50 free simulated minutes a month), from the `diagram.json`, `wokwi.toml` and scenario the `fw` stage writes from `board.toml`'s `sim` parts and `[[sim.wokwi_step]]`s. Results go to `firmware/sim.json` and the review page.
+- Open source first (D-025): the `sim` stage runs the whole image in Espressif's QEMU (free, unlimited); `sim --wokwi` also runs the pin checks in Wokwi (50 free simulated minutes a month), from the `diagram.json`, `wokwi.toml` and scenario the `fw` stage writes from `board.toml`'s `sim` parts and `[[sim.wokwi_step]]`s. `[[sim.scenario]]`s in `board.toml` drive the whole image over its console in QEMU (`SIM` commands stand in for the pins). Results go to `firmware/sim.json` and the review page.
 - Includes a self-test mode that checks every part on the board and reports over USB. The same self-test runs at bring-up.
 - **No physical prototype by default.** The owner won't buy modules or solder.
   - Claude asks for a dev-board test only for a specific risk simulation can't settle, e.g. a sensor's behaviour in real air.

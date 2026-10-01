@@ -45,14 +45,14 @@ UNVERIFIED | INFERRED, `fix` = firmware | rework | new_board, `miss`, optional `
 optional `accepted` = the owner's own words). Every open UNVERIFIED or INFERRED item gets a
 `[[risk]]`. Red (a requirement with no proof, or a `new_board` risk not accepted) blocks
 freeze unless the owner accepts it by name.
-<!-- pending: lands with 2a/2b/2c/2d -->
-A proof with `evidence = "scenario:<name>"` is checked against `firmware/sim.json`: it is red if
-that `[[sim.scenario]]` failed or never ran.
-<!-- /pending -->
+A proof with `how = "simulated"` and `evidence = "scenario:<name>"` is checked against
+`firmware/sim.json`: it is red if that scenario (from `[[sim.scenario]]` or `sim/run.py`) failed
+or never ran.
 
 ## Freeze
 On the owner's "freeze": `scripts/freeze.sh <board>`. It needs a draft-tagged HEAD, a clean
-tree, and a current `review/readiness.json` with nothing red. It tags
+tree, and a current `review/readiness.json` with nothing red: newer than both `board.toml` and
+`firmware/sim.json`, so a scenario proof can't be greener than the last simulation run. It tags
 `<board>-rev<X>-freeze`. The case (`case/`) freezes with the board.
 Freeze also stores in the tag the sha256 of every footprint and symbol the board uses, and
 the kicad-cli version (`scripts/lib-hashes.sh`). `scripts/check-frozen.sh` refuses when any of

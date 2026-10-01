@@ -24,6 +24,11 @@ fn new_board() {
         assert!(!text.contains("__NAME__") && !text.contains("<name>"), "{f} still has a placeholder");
     }
     assert!(std::fs::read_to_string(dir.join("Cargo.toml")).unwrap().contains("name = \"demo-1\""));
+    // only the board's own name is filled in; the template's other placeholders stay as written
+    let toml = std::fs::read_to_string(dir.join("board.toml")).unwrap();
+    for kept in ["test:<test>", "\"scenario:<scenario>\"", "scenarios/<scenario>.log"] {
+        assert!(toml.contains(kept), "board.toml lost {kept}");
+    }
     let err = scaffold::new_board(&root, "demo-1").unwrap_err().to_string();
     assert!(err.contains("already exists"), "{err}");
     assert!(scaffold::new_board(&root, "Bad_Name").is_err());

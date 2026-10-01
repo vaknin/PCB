@@ -69,8 +69,8 @@ source = "WROOM-1 datasheet, HARDWARE_LESSONS.md"
 # One per requirement in spec.md, same IDs. covered_by lists what shows it is met:
 #   part:<ref>   a part in the circuit
 #   pin:<signal> a signal in the pin map above
-#   test:<name>  a firmware self-test below
-#   gate:<name>  erc, drc, netlist, netclasses, routing or board_toml
+#   test:<test>  a firmware self-test below
+#   gate:<gate>  erc, drc, netlist, netclasses, routing or board_toml
 #   power:<src>  that power source's current budget holds
 #   sleep:<src>  that source's sleep budget holds (the review page shows the total next to it)
 [[requirement]]
@@ -83,7 +83,7 @@ covered_by = ["part:D2", "pin:STATUS_LED", "test:status_led"]
 # requirement; they belong to the [[requirement]] above them.
 #   how:      simulated | datasheet | devboard | gate | unprovable
 #   evidence: the scenario, datasheet table, measurement or gate that shows it, in plain words;
-#             for unprovable: why, and what covers it at bring-up. "scenario:<name>" (how =
+#             for unprovable: why, and what covers it at bring-up. "scenario:<scenario>" (how =
 #             "simulated") links a [[sim.scenario]] (or sim/run.py) result: red if it fails
 # A requirement with no proof is red on the page and blocks freeze (not a gate failure); one
 # with only `unprovable` proofs is amber.
@@ -135,9 +135,9 @@ level = 1
 # QEMU scenarios (the `sim` stage, after its boot check; QEMU is free and unlimited, but has no
 # pins: the firmware's `SIM` console commands stand in for them, firmware/components/simcmd).
 # Each scenario boots a fresh copy of the QEMU image; its log is in
-# firmware/build-qemu/scenarios/<name>.log, its result in firmware/sim.json and on the review
+# firmware/build-qemu/scenarios/<scenario>.log, its result in firmware/sim.json and on the review
 # page. A QEMU crash (the simulator's, not the firmware's) reruns it, up to 3 times, counted.
-#   name:      [a-z0-9_]+; a [[requirement.proof]] with evidence = "scenario:<name>" (how =
+#   name:      [a-z0-9_]+; a [[requirement.proof]] with evidence = "scenario:<scenario>" (how =
 #              "simulated") is green while it passes and red while it fails or has no result
 #   about:     what it shows, plain words
 #   nic:       optional, true: QEMU's Ethernet (the Wi-Fi stand-in, CONFIG_ETH_USE_OPENETH)

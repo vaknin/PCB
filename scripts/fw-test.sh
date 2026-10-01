@@ -3,9 +3,12 @@
 #
 #   scripts/fw-test.sh            skill check, gcc unit tests, then the ESP-IDF linux-target app
 #   scripts/fw-test.sh --gcc      only the skill check and the gcc unit tests (no ESP-IDF needed)
-#   scripts/fw-test.sh --scenarios   also layer 2's scripted scenarios: every
-#                                 boards/*/firmware/sim/run.py (whole image in QEMU against a
-#                                 local mock server; a few minutes). With --gcc: gcc and these.
+#   scripts/fw-test.sh --scenarios   also layer 2's scenarios, whole image in QEMU (a few
+#                                 minutes): a board with [[sim.scenario]] in its board.toml runs
+#                                 its `sim` stage (those scenarios, then its sim/run.py if any;
+#                                 sim.json goes to the log directory, not the board's); any other
+#                                 board with firmware/sim/run.py runs that (QEMU against a local
+#                                 mock server). With --gcc: gcc and these.
 #
 # skill check: scripts/skill-check.sh first (a few seconds): the pcb-pipeline skill names only
 # scripts, stages, flags and board.toml keys that exist.
@@ -109,13 +112,26 @@ fi
 
 if $scenarios; then
     echo "== FW-TEST (QEMU scenarios)"
-    for run in "$root"/boards/*/firmware/sim/run.py; do
-        board=$(basename "$(dirname "$(dirname "$(dirname "$run")")")")
+    for dir in "$root"/boards/*/; do
+        board=$(basename "$dir")
         log="$out/scenarios-$board.log"
         code=0
-        "$run" >"$log" 2>&1 || code=$?
-        grep -E '^   [a-z_]+ +(pass|FAIL) ' "$log" | cut -c1-160 | sed "s/^   /   $board: /"
-        passed=$(grep -cE '^   [a-z_]+ +pass ' "$log" || true)
+        if grep -qE '^\[\[sim\.scenario\]\]' "$dir/board.toml" 2>/dev/null && [[ -f "$dir/firmware/CMakeLists.txt" ]]; then
+            # the sim stage: board.toml's scenarios and the board's run.py hook; its sim.json goes
+            # under $out so the board's committed one is left alone
+            (cd "$root" && cargo run --release -q -p "$board" -- sim --out "$out/sim-$board") >"$log" 2>&1 || code=$?
+            if ! grep -qE '^== SIM \(QEMU\): PASS' "$log" || ! grep -qE '^== SIM \(QEMU scenarios\): PASS' "$log"; then
+                [[ $code -ne 0 ]] || code=1
+            fi
+            rows=$(sed -n '/^== SIM (QEMU scenarios)/,$p' "$log")
+        elif [[ -x "$dir/firmware/sim/run.py" ]]; then
+            "$dir/firmware/sim/run.py" >"$log" 2>&1 || code=$?
+            rows=$(cat "$log")
+        else
+            continue
+        fi
+        grep -E '^   [a-z_./]+ +(pass|FAIL) ' <<<"$rows" | cut -c1-160 | sed "s/^   /   $board: /" || true
+        passed=$(grep -cE '^   [a-z_./]+ +pass ' <<<"$rows" || true)
         if [[ $code -eq 0 ]]; then
             total_pass=$((total_pass + passed))
         else
