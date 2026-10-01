@@ -1,13 +1,13 @@
 {
-  "date": "2026-09-29",
-  "seconds": 4,
+  "date": "2026-10-01",
+  "seconds": 11,
   "qemu": {
     "ok": true,
     "banner": {
       "name": "starter",
       "rev": "0",
       "target": "qemu",
-      "fw": "0c1cbb3-dirty",
+      "fw": "8bf3eff-dirty",
       "slot": "ota_0",
       "psram": 8388608,
       "nvs": true
@@ -31,7 +31,7 @@
       {
         "test": "boot_button",
         "result": "skip",
-        "detail": "no GPIO in QEMU"
+        "detail": "no GPIO in QEMU (SELFTEST over the console takes a SIM PRESS)"
       }
     ],
     "summary": {
@@ -39,12 +39,35 @@
       "fail": 0,
       "skip": 4,
       "missing": 0,
-      "ms": 221
+      "ms": 310
     },
     "provision": true,
     "problems": [],
-    "seconds": 0.0
+    "seconds": 1.0
   },
+  "scenarios": [
+    {
+      "scenario": "press",
+      "source": "board.toml",
+      "about": "Short and long presses of BOOT are told apart; a bad SIM line is refused",
+      "ok": true,
+      "seconds": 2.5,
+      "evidence": "PROV READY | SIM OK PRESS 300 @322 | BUTTON {\"kind\":\"short\",\"ms\":300} | SIM OK PRESS 1500 @628 | BUTTON {\"kind\":\"long\",\"ms\":1499} | SIM OK BUTTON 1 @2137 | SIM OK BUTTON 0 @2340 | BUTTON {\"kind\":\"short\",\"ms\":200} | SIM ERR BUTTON 7 | STATUS {\"ms\":2350,\"heap_free\":8756283,\"heap_min\":8724252}",
+      "qemu_crashes": 0,
+      "log": "build-qemu/scenarios/press.log"
+    },
+    {
+      "scenario": "selftest",
+      "source": "board.toml",
+      "about": "The self-tests run again on request, the BOOT test passing on a press; a stored value survives a power cycle",
+      "ok": true,
+      "seconds": 2.2,
+      "evidence": "provisioned sim_note | SELFTEST_PRESS boot_button | SIM OK PRESS 300 @449 | SELFTEST {\"test\":\"boot_button\",\"result\":\"pass\",\"detail\":\"pressed for 300 ms\"} | SELFTEST_DONE {\"pass\":1,\"fail\":0,\"skip\":3,\"missing\":0,\"ms\":754} | rebooted | BOARD {\"name\":\"starter\",\"rev\":\"0\",\"target\":\"qemu\",\"fw\":\"8bf3eff-dirty\",\"slot\":\"ota_0\",\"psram\":8388608,\"nvs\":true} | PROV READY | PROV KEY sim_note 4",
+      "qemu_crashes": 0,
+      "log": "build-qemu/scenarios/selftest.log"
+    }
+  ],
+  "scenario_hook": null,
   "wokwi": {
     "ok": true,
     "date": "2026-09-29",

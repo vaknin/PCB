@@ -83,7 +83,8 @@ covered_by = ["part:D2", "pin:STATUS_LED", "test:status_led"]
 # requirement; they belong to the [[requirement]] above them.
 #   how:      simulated | datasheet | devboard | gate | unprovable
 #   evidence: the scenario, datasheet table, measurement or gate that shows it, in plain words;
-#             for unprovable: why, and what covers it at bring-up
+#             for unprovable: why, and what covers it at bring-up. "scenario:<name>" (how =
+#             "simulated") links a [[sim.scenario]] (or sim/run.py) result: red if it fails
 # A requirement with no proof is red on the page and blocks freeze (not a gate failure); one
 # with only `unprovable` proofs is amber.
 # [[requirement.proof]]
@@ -130,6 +131,44 @@ self_test = ["status_led"]
 wait = "SELFTEST_LOOK status_led on"
 expect = "STATUS_LED"
 level = 1
+
+# QEMU scenarios (the `sim` stage, after its boot check; QEMU is free and unlimited, but has no
+# pins: the firmware's `SIM` console commands stand in for them, firmware/components/simcmd).
+# Each scenario boots a fresh copy of the QEMU image; its log is in
+# firmware/build-qemu/scenarios/<name>.log, its result in firmware/sim.json and on the review
+# page. A QEMU crash (the simulator's, not the firmware's) reruns it, up to 3 times, counted.
+#   name:      [a-z0-9_]+; a [[requirement.proof]] with evidence = "scenario:<name>" (how =
+#              "simulated") is green while it passes and red while it fails or has no result
+#   about:     what it shows, plain words
+#   nic:       optional, true: QEMU's Ethernet (the Wi-Fi stand-in, CONFIG_ETH_USE_OPENETH)
+#   provision: optional NVS values set after boot (PROV SET). Literal test values only, never a
+#              secret or a file:/prompt reference: they are in the repo
+# Steps, in order, one verb each:
+#   send = "<line>"              a console line
+#   sim = "<VERB> [arg]"         sends `SIM <VERB> [arg]`, waits 10 s for `SIM OK <VERB> [arg]`
+#                                (BUTTON 0|1, PRESS <ms>, or the board's own verbs)
+#   wait = "<regex>"             the next line it finds (after the last one matched)
+#   expect_json = "<TAG>"        the next `<TAG> {json}` line whose `fields = { k = v }` all match
+#   timeout_ms = <ms>            with wait or expect_json: how long (30000 if not given)
+#   sleep_ms = <ms>              let the firmware run
+#   reboot = true                kill QEMU and boot the same image again (a power cycle)
+# A wait that times out sends STATUS first, so the log shows what the firmware says of itself.
+# A board that needs more (a mock server, several builds) adds firmware/sim/run.py: the stage
+# runs it too and reads its build-qemu/scenarios.json.
+# [[sim.scenario]]
+# name = "press"
+# about = "A short press of the button is seen"
+#
+# [[sim.scenario.step]]
+# wait = "^PROV READY"
+# timeout_ms = 60000
+#
+# [[sim.scenario.step]]
+# sim = "PRESS 300"
+#
+# [[sim.scenario.step]]
+# expect_json = "BUTTON"
+# fields = { kind = "short" }
 
 # Values `devctl provision` writes into the board's NVS (optional). Only references go here,
 # never values: "file:<path>#<field>" (a key=value line in that file) or "prompt".

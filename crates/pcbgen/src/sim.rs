@@ -5,6 +5,9 @@
 //!   boots it with the module's 16 MB flash and 8 MB octal PSRAM, and checks the boot banner, the
 //!   self-tests `board.toml` lists and a provisioning round trip. QEMU has no GPIO, I2C, I2S, USB,
 //!   Wi-Fi or deep sleep, so tests that need them report "skip" there.
+//! - **QEMU scenarios** (`crate::scenario`): board.toml's `[[sim.scenario]]` steps, each on a
+//!   fresh copy of that image, then the board's own `firmware/sim/run.py` if it has one. A
+//!   QEMU crash (a signal) reruns the scenario and is counted, never blamed on the firmware.
 //! - **Wokwi** (`sim --wokwi`, free plan 50 simulated minutes a month): the pin checks QEMU
 //!   can't do. Builds the Wokwi target (`firmware/build-wokwi`) and runs the files the `fw`
 //!   stage generated (`crate::wokwi`) with `wokwi-cli`, a tight timeout and the token from
@@ -28,6 +31,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::boardfile::BoardFile;
+use crate::scenario;
 use crate::wokwi;
 
 /// ESP32-S3-WROOM-1-N16R8 (the only module pcbgen has a GPIO table for).
@@ -61,12 +65,34 @@ pub fn run(bf: &BoardFile, fw: &Path, out: &Path, opts: &Options) -> Result<bool
     }
     let idf = idf_path()?;
     let started = Instant::now();
-    let qemu = match qemu_run(bf, fw, &idf) {
-        Ok(v) => v,
+    let built = build(fw, &idf, "qemu").and_then(|b| Ok((flash_image(&b, &idf)?, b)));
+    let qemu = match &built {
+        Ok((image, b)) => qemu_run(bf, b, image).unwrap_or_else(|e| json!({"ok": false, "problems": [format!("{e:#}")]})),
         Err(e) => json!({"ok": false, "problems": [format!("{e:#}")]}),
     };
     let qemu_ok = qemu["ok"] == true;
     print_summary("QEMU", &qemu);
+
+    // the scenarios: board.toml's, then the board's own runner's (never on a stale image)
+    let mut scenarios: Vec<Value> = vec![];
+    let mut hook = Value::Null;
+    match (&built, qemu_binary()) {
+        (Ok((image, _)), Ok(q)) => {
+            scenarios = scenario::run_all(&bf.sim.scenarios, &q, image, fw);
+            if let Some((found, summary)) = scenario::run_hook(fw) {
+                scenarios.extend(found);
+                hook = summary;
+            }
+        }
+        (Err(_), _) => {
+            scenarios = bf.sim.scenarios.iter().map(|s| scenario::failed(s, "not run: the QEMU build failed")).collect();
+        }
+        (_, Err(e)) => {
+            scenarios = bf.sim.scenarios.iter().map(|s| scenario::failed(s, &format!("not run: {e:#}"))).collect();
+        }
+    }
+    scenario::print(&scenarios);
+    let scenarios_ok = scenarios.iter().all(|s| s["ok"] == true);
 
     let old: Value = std::fs::read_to_string(out.join("sim.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     let mut wokwi_ok = true;
@@ -85,12 +111,14 @@ pub fn run(bf: &BoardFile, fw: &Path, out: &Path, opts: &Options) -> Result<bool
         "date": crate::schematic::today(),
         "seconds": started.elapsed().as_secs(),
         "qemu": qemu,
+        "scenarios": scenarios,
+        "scenario_hook": hook,
         "wokwi": wokwi,
     });
     std::fs::create_dir_all(out)?;
     std::fs::write(out.join("sim.json"), serde_json::to_string_pretty(&result)? + "\n")?;
     println!("sim: {}", out.join("sim.json").display());
-    Ok(qemu_ok && wokwi_ok)
+    Ok(qemu_ok && scenarios_ok && wokwi_ok)
 }
 
 fn print_summary(what: &str, r: &Value) {
@@ -187,6 +215,25 @@ pub fn qemu_binary() -> Result<PathBuf> {
     found.pop().context("no qemu-system-xtensa under ~/.espressif/tools/qemu-xtensa")
 }
 
+/// QEMU itself died from a signal (Espressif's QEMU 9.2.2 sometimes segfaults, HARDWARE_LESSONS):
+/// that is the simulator, not the firmware, so a scenario is run again. Find it with
+/// `err.downcast_ref::<QemuDied>()`.
+#[derive(Debug)]
+pub struct QemuDied(pub String);
+
+impl std::fmt::Display for QemuDied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for QemuDied {}
+
+/// The firmware printed a crash (`Guru Meditation`, `abort()`).
+pub fn is_crash_line(l: &str) -> bool {
+    l.contains("Guru Meditation") || l.starts_with("abort()")
+}
+
 /// A running QEMU: its console lines arrive on a channel, so every wait has a deadline.
 /// `log` holds every line read and the shown form of every line sent.
 pub struct Console {
@@ -195,11 +242,23 @@ pub struct Console {
     lines: Receiver<String>,
     pub log: Vec<String>,
     deadline: Instant,
+    /// The lines read (not the ones sent); `wait` looks from `cursor` on.
+    read: Vec<String>,
+    cursor: usize,
+    /// Why QEMU is gone, once it is (so every later call says the same).
+    gone: Option<String>,
+    died: bool,
 }
 
 impl Console {
     /// Boots `image` (a whole 16 MB flash) with the module's octal PSRAM.
     pub fn start(qemu: &Path, image: &Path) -> Result<Console> {
+        Self::start_with(qemu, image, &[])
+    }
+
+    /// The same, with more QEMU arguments, e.g. `["-nic", "user,model=open_eth"]` (Ethernet as
+    /// the Wi-Fi stand-in, `CONFIG_ETH_USE_OPENETH`).
+    pub fn start_with(qemu: &Path, image: &Path, extra: &[String]) -> Result<Console> {
         let mut cmd = Command::new(qemu);
         // QEMU 9.2.2 sometimes segfaults; preloading `scripts/nodump.c` keeps systemd-coredump
         // (and the desktop's crash notice) out of it. The exit status is unchanged.
@@ -212,6 +271,7 @@ impl Console {
             .arg("-drive")
             .arg(format!("file={},if=mtd,format=raw", image.display()))
             .args(["-global", "driver=ssi_psram,property=is_octal,value=true", "-nographic", "-serial", "mon:stdio"])
+            .args(extra)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -229,19 +289,154 @@ impl Console {
                 }
             });
         }
-        Ok(Console { child, stdin, lines: rx, log: vec![], deadline: Instant::now() + QEMU_TIMEOUT })
+        Ok(Console {
+            child,
+            stdin,
+            lines: rx,
+            log: vec![],
+            deadline: Instant::now() + QEMU_TIMEOUT,
+            read: vec![],
+            cursor: 0,
+            gone: None,
+            died: false,
+        })
     }
 
-    /// The next console line, or None if none comes within `timeout`; an error once QEMU exited.
+    /// The next console line, or None if none comes within `timeout`; an error once QEMU exited,
+    /// a [`QemuDied`] if a signal killed it.
     pub fn next_line(&mut self, timeout: Duration) -> Result<Option<String>> {
-        match self.lines.recv_timeout(timeout) {
-            Ok(l) => {
-                self.log.push(l.clone());
-                Ok(Some(l))
+        if self.gone.is_none() {
+            match self.lines.recv_timeout(timeout) {
+                Ok(l) => {
+                    self.log.push(l.clone());
+                    self.read.push(l.clone());
+                    return Ok(Some(l));
+                }
+                Err(RecvTimeoutError::Timeout) => return Ok(None),
+                Err(RecvTimeoutError::Disconnected) => self.exited(),
             }
-            Err(RecvTimeoutError::Timeout) => Ok(None),
-            Err(RecvTimeoutError::Disconnected) => bail!("QEMU exited"),
         }
+        let why = self.gone.clone().unwrap_or_default();
+        if self.died { Err(QemuDied(why).into()) } else { Err(anyhow::anyhow!(why)) }
+    }
+
+    /// Both pipes closed: how QEMU ended.
+    fn exited(&mut self) {
+        use std::os::unix::process::ExitStatusExt;
+        let status = self.child.wait().ok();
+        let signal = status.and_then(|s| s.signal());
+        self.died = signal.is_some();
+        self.gone = Some(match (signal, status.and_then(|s| s.code())) {
+            (Some(sig), _) => format!("QEMU itself crashed (signal {sig}); not the firmware's fault"),
+            (None, Some(code)) => format!("QEMU exited with code {code}"),
+            _ => "QEMU exited".into(),
+        });
+        self.log.push(format!("==== {}", self.gone.as_deref().unwrap_or("")));
+    }
+
+    /// Reads whatever arrives for `d` (the lines go to the log and stay for `wait`).
+    pub fn drain(&mut self, d: Duration) {
+        let end = Instant::now() + d;
+        loop {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() || self.next_line(left.min(Duration::from_millis(50))).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// The next line from the cursor on that `re` finds (the cursor moves past it). A crash line
+    /// first fails it (with the backtrace drained into the log); so does running out of
+    /// `timeout`, after sending `STATUS` so that what the firmware says of itself is in the log.
+    pub fn wait(&mut self, re: &Regex, timeout: Duration) -> Result<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            while self.cursor < self.read.len() {
+                let l = self.read[self.cursor].clone();
+                self.cursor += 1;
+                if re.is_match(&l) {
+                    return Ok(l);
+                }
+                if is_crash_line(&l) {
+                    self.drain(Duration::from_secs(2));
+                    bail!("the firmware crashed while waiting for /{re}/: {l}");
+                }
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                if self.gone.is_none() && self.send("STATUS").is_ok() {
+                    self.drain(Duration::from_secs(1));
+                }
+                bail!("timed out after {:.0} s waiting for /{re}/", timeout.as_secs_f64());
+            }
+            self.next_line(left.min(Duration::from_millis(500)))
+                .map_err(|e| e.context(format!("while waiting for /{re}/")))?;
+        }
+    }
+
+    /// The next `<tag> {json}` line whose `fields` all equal the ones given: its JSON.
+    pub fn expect_json(&mut self, tag: &str, fields: &serde_json::Map<String, Value>, timeout: Duration) -> Result<Value> {
+        let deadline = Instant::now() + timeout;
+        let re = Regex::new(&format!(r"^{} \{{", regex::escape(tag)))?;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let l = self.wait(&re, left.max(Duration::from_millis(1))).map_err(|e| e.context(format!("waiting for {tag} {}", Value::Object(fields.clone()))))?;
+            let v: Value = serde_json::from_str(&l[tag.len() + 1..]).with_context(|| format!("not JSON: {l}"))?;
+            if json_matches(&v, fields) {
+                return Ok(v);
+            }
+        }
+    }
+
+    /// Sends `SIM <what>` and waits (10 s) for the firmware's `SIM OK <what> @<ms>`. The cursor
+    /// stays: lines printed meanwhile are still there for the next `wait`. Returns the reply.
+    pub fn sim(&mut self, what: &str) -> Result<String> {
+        let what = what.split_whitespace().collect::<Vec<_>>().join(" ");
+        let since = self.read.len();
+        self.send(&format!("SIM {what}"))?;
+        let ok = Regex::new(&format!(r"^SIM OK {}( @|$)", regex::escape(&what)))?;
+        let err = Regex::new(&format!(r"^SIM ERR {}$", regex::escape(&what)))?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut at = since;
+        loop {
+            while at < self.read.len() {
+                let l = &self.read[at];
+                at += 1;
+                if ok.is_match(l) {
+                    return Ok(l.clone());
+                }
+                if err.is_match(l) {
+                    bail!("the firmware refused `SIM {what}`: {l}");
+                }
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                bail!("no answer to `SIM {what}` in 10 s");
+            }
+            self.next_line(left.min(Duration::from_millis(100)))?;
+        }
+    }
+
+    /// Kills QEMU (a pulled plug); the log stays.
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
+    /// An error if QEMU has exited (a [`QemuDied`] if a signal ended it) or the firmware printed
+    /// a crash at any point, whether or not a wait was looking then.
+    pub fn check_alive(&mut self) -> Result<()> {
+        self.drain(Duration::from_millis(100));
+        if self.gone.is_none() && self.child.try_wait().ok().flatten().is_some() {
+            self.drain(Duration::from_millis(500)); // the rest of the pipes, then Disconnected
+        }
+        if self.gone.is_some() {
+            self.next_line(Duration::ZERO)?;
+        }
+        if let Some(l) = self.read.iter().find(|l| is_crash_line(l)) {
+            bail!("the firmware crashed: {l}");
+        }
+        Ok(())
     }
 
     /// Waits for a line starting with `prefix`; returns the rest of it.
@@ -277,6 +472,16 @@ impl Console {
     }
 }
 
+/// Every field in `want` is in `got` with the same value (numbers compared as numbers, so 1 and
+/// 1.0 match); other fields of `got` don't matter.
+pub fn json_matches(got: &Value, want: &serde_json::Map<String, Value>) -> bool {
+    want.iter().all(|(k, w)| match (got.get(k), w) {
+        (Some(Value::Number(a)), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        (Some(g), w) => g == w,
+        (None, _) => false,
+    })
+}
+
 impl Drop for Console {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -284,11 +489,9 @@ impl Drop for Console {
     }
 }
 
-fn qemu_run(bf: &BoardFile, fw: &Path, idf: &Path) -> Result<Value> {
-    let build = build(fw, idf, "qemu")?;
-    let image = flash_image(&build, idf)?;
+fn qemu_run(bf: &BoardFile, build: &Path, image: &Path) -> Result<Value> {
     let started = Instant::now();
-    let mut con = Console::start(&qemu_binary()?, &image)?;
+    let mut con = Console::start(&qemu_binary()?, image)?;
     let result = qemu_script(bf, &mut con);
     std::fs::write(build.join("sim.log"), con.log.join("\n") + "\n")?;
     let mut r = result?;

@@ -176,6 +176,94 @@ level = 1
 wait = "SELFTEST_PRESS boot_button"
 press = "BOOT"
 
+# QEMU scenarios (the `sim` stage; QEMU is free and unlimited). QEMU has no GPIO, so BOOT is
+# pressed over the console (`SIM PRESS <ms>`, firmware/components/simcmd).
+[[sim.scenario]]
+name = "press"
+about = "Short and long presses of BOOT are told apart; a bad SIM line is refused"
+
+[[sim.scenario.step]]
+wait = "^PROV READY"
+timeout_ms = 60000
+
+[[sim.scenario.step]]
+sim = "PRESS 300"
+
+[[sim.scenario.step]]
+expect_json = "BUTTON"
+fields = { kind = "short" }
+
+[[sim.scenario.step]]
+sim = "PRESS 1500"
+
+[[sim.scenario.step]]
+expect_json = "BUTTON"
+fields = { kind = "long" }
+
+[[sim.scenario.step]]
+sim = "BUTTON 1"
+
+[[sim.scenario.step]]
+sleep_ms = 200
+
+[[sim.scenario.step]]
+sim = "BUTTON 0"
+
+[[sim.scenario.step]]
+expect_json = "BUTTON"
+fields = { kind = "short" }
+
+[[sim.scenario.step]]
+send = "SIM BUTTON 7"
+
+[[sim.scenario.step]]
+wait = "^SIM ERR BUTTON 7$"
+
+[[sim.scenario.step]]
+send = "STATUS"
+
+[[sim.scenario.step]]
+wait = "^STATUS \\{"
+
+[[sim.scenario]]
+name = "selftest"
+about = "The self-tests run again on request, the BOOT test passing on a press; a stored value survives a power cycle"
+provision = { sim_note = "kept" }
+
+[[sim.scenario.step]]
+send = "SELFTEST"
+
+[[sim.scenario.step]]
+wait = "^SELFTEST_PRESS boot_button$"
+
+[[sim.scenario.step]]
+sim = "PRESS 300"
+
+[[sim.scenario.step]]
+expect_json = "SELFTEST"
+fields = { test = "boot_button", result = "pass" }
+
+[[sim.scenario.step]]
+expect_json = "SELFTEST_DONE"
+fields = { fail = 0, missing = 0, pass = 1, skip = 3 }
+
+[[sim.scenario.step]]
+reboot = true
+
+[[sim.scenario.step]]
+wait = "^BOARD \\{"
+timeout_ms = 60000
+
+[[sim.scenario.step]]
+wait = "^PROV READY"
+timeout_ms = 60000
+
+[[sim.scenario.step]]
+send = "PROV LIST"
+
+[[sim.scenario.step]]
+wait = "^PROV KEY sim_note 4$"
+
 # The printed case (D-025 Phase B; the `case` stage builds and fit-checks it into case/).
 # White resin; the four M3 corner holes take self-tapping screws from below.
 [case]

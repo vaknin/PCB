@@ -9,13 +9,14 @@
 //! Artifact page body, like the review page) and `readiness.json`, which `scripts/freeze.sh`
 //! reads so a freeze can't happen past a red item or a stale page.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{Value, json};
 
-use crate::boardfile::{BoardFile, Fix, How, Requirement, Risk, Tag};
+use crate::boardfile::{BoardFile, Fix, How, Proof, Requirement, Risk, Tag};
 use crate::circuit::Circuit;
 use crate::review::{STYLE, chip, esc};
 
@@ -44,9 +45,37 @@ impl State {
     }
 }
 
-/// Red with no proof at all; amber when every proof says "can't be proven before delivery".
-pub fn requirement_state(r: &Requirement) -> State {
-    if r.proofs.is_empty() {
+/// The QEMU scenarios' last results (`firmware/sim.json` `scenarios`, the `sim` stage): name ->
+/// passed.
+pub type Scenarios = BTreeMap<String, bool>;
+
+pub fn scenarios(sim: Option<&Value>) -> Scenarios {
+    sim.and_then(|s| s["scenarios"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|s| Some((s["scenario"].as_str()?.to_string(), s["ok"] == true)))
+        .collect()
+}
+
+/// The scenario a proof points at (`evidence = "scenario:<name>"`), if it does.
+pub fn scenario_of(p: &Proof) -> Option<&str> {
+    p.evidence.trim().strip_prefix("scenario:").map(str::trim)
+}
+
+/// Why a requirement's scenario proof doesn't hold (failed, or no result), plain text; None
+/// when every scenario it names passed.
+fn scenario_problem(r: &Requirement, sc: &Scenarios) -> Option<String> {
+    r.proofs.iter().filter_map(scenario_of).find_map(|name| match sc.get(name) {
+        Some(true) => None,
+        Some(false) => Some(format!("{} ({}): its scenario {name} failed in the last simulation run.", r.id, r.text.trim())),
+        None => Some(format!("{} ({}): its scenario {name} has no result (run the sim stage).", r.id, r.text.trim())),
+    })
+}
+
+/// Red with no proof at all, or with a scenario proof whose scenario failed or never ran; amber
+/// when every proof says "can't be proven before delivery".
+pub fn requirement_state(r: &Requirement, sc: &Scenarios) -> State {
+    if r.proofs.is_empty() || scenario_problem(r, sc).is_some() {
         State::Red
     } else if r.proofs.iter().all(|p| p.how == How::Unprovable) {
         State::Amber
@@ -76,7 +105,9 @@ pub struct Readiness {
     pub filled: bool,
 }
 
-pub fn assess(bf: Option<&BoardFile>) -> Readiness {
+/// `sim` is the board's `firmware/sim.json` (None if the sim stage never ran).
+pub fn assess(bf: Option<&BoardFile>, sim: Option<&Value>) -> Readiness {
+    let sc = scenarios(sim);
     let mut r = Readiness::default();
     let Some(bf) = bf else {
         // never "ready" by having nothing to look at
@@ -90,7 +121,8 @@ pub fn assess(bf: Option<&BoardFile>) -> Readiness {
         State::Green => r.green += 1,
     };
     for q in &bf.requirements {
-        count(requirement_state(q), format!("{} ({}): nothing shows yet that it is met.", q.id, q.text.trim()));
+        let why = scenario_problem(q, &sc).unwrap_or_else(|| format!("{} ({}): nothing shows yet that it is met.", q.id, q.text.trim()));
+        count(requirement_state(q, &sc), why);
     }
     for k in &bf.risks {
         count(risk_state(k), format!("{}: a miss would need a new board, and it hasn't been accepted.", k.what.trim().trim_end_matches('.')));
@@ -198,20 +230,33 @@ ul.open .chip { margin-left: .35rem; }\n\
 ul.open p { margin: .2rem 0; }\n\
 </style>\n";
 
-fn requirement_rows(bf: &BoardFile) -> String {
+/// One proof on the page: a scenario proof says how its scenario did.
+fn proof_html(p: &Proof, sc: &Scenarios) -> String {
+    if let Some(name) = scenario_of(p) {
+        let (class, word, said) = match sc.get(name) {
+            Some(true) => ("ok", how_label(p.how), "passed in the last simulation run"),
+            Some(false) => ("bad", "Scenario failed", "failed in the last simulation run"),
+            None => ("bad", "Scenario not run", "has no result yet"),
+        };
+        return format!(
+            "<div class=\"proof\">{}Scenario <code>{}</code> {said} (the review page's Firmware in simulation)</div>",
+            chip(class, word),
+            esc(name)
+        );
+    }
+    format!("<div class=\"proof\">{}{}</div>", chip(if p.how == How::Unprovable { "warn" } else { "ok" }, how_label(p.how)), esc(p.evidence.trim()))
+}
+
+fn requirement_rows(bf: &BoardFile, sc: &Scenarios) -> String {
     let mut rows = String::new();
     for q in &bf.requirements {
-        let state = requirement_state(q);
+        let state = requirement_state(q, sc);
         let word = match state {
             State::Red => "Not proven",
             State::Amber => "Only on the real board",
             State::Green => "Proven",
         };
-        let mut proofs: String = q
-            .proofs
-            .iter()
-            .map(|p| format!("<div class=\"proof\">{}{}</div>", chip(if p.how == How::Unprovable { "warn" } else { "ok" }, how_label(p.how)), esc(p.evidence.trim())))
-            .collect();
+        let mut proofs: String = q.proofs.iter().map(|p| proof_html(p, sc)).collect();
         if proofs.is_empty() {
             proofs = "<span class=\"muted\">Nothing shows this yet.</span>".into();
         }
@@ -254,7 +299,8 @@ fn open_items(bf: &BoardFile) -> String {
 
 /// The page. `flagged` is the review page's automatic "things to check" (escaped HTML, one item
 /// each): what the pipeline noticed on its own, next to what board.toml declares.
-pub fn page(c: &Circuit, bf: Option<&BoardFile>, r: &Readiness, flagged: &[String], date: &str) -> String {
+pub fn page(c: &Circuit, bf: Option<&BoardFile>, sim: Option<&Value>, r: &Readiness, flagged: &[String], date: &str) -> String {
+    let sc = scenarios(sim);
     let mut h = format!("<title>{}</title>\n", esc(&format!("{} readiness", c.title)));
     h += STYLE;
     h += EXTRA_STYLE;
@@ -282,7 +328,7 @@ pub fn page(c: &Circuit, bf: Option<&BoardFile>, r: &Readiness, flagged: &[Strin
         Some(bf) if !bf.requirements.is_empty() => (
             format!(
                 "<div class=\"scroll\"><table><thead><tr><th>ID</th><th>It must</th><th>Where it stands</th><th>How we know</th></tr></thead><tbody>\n{}</tbody></table></div>\n",
-                requirement_rows(bf)
+                requirement_rows(bf, &sc)
             ),
             open_items(bf),
         ),
@@ -305,11 +351,12 @@ pub fn page(c: &Circuit, bf: Option<&BoardFile>, r: &Readiness, flagged: &[Strin
     h
 }
 
-/// Writes `<dir>/readiness.html` and `<dir>/readiness.json`; returns the counts for the review page.
-pub fn write(dir: &Path, c: &Circuit, bf: Option<&BoardFile>, flagged: &[String], date: &str) -> Result<Readiness> {
-    let r = assess(bf);
+/// Writes `<dir>/readiness.html` and `<dir>/readiness.json`; returns the counts for the review
+/// page. `sim` is the board's `firmware/sim.json`, for proofs that name a scenario.
+pub fn write(dir: &Path, c: &Circuit, bf: Option<&BoardFile>, sim: Option<&Value>, flagged: &[String], date: &str) -> Result<Readiness> {
+    let r = assess(bf, sim);
     std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join(PAGE), page(c, bf, &r, flagged, date))?;
+    std::fs::write(dir.join(PAGE), page(c, bf, sim, &r, flagged, date))?;
     std::fs::write(dir.join(JSON), serde_json::to_string_pretty(&r.json(date))? + "\n")?;
     Ok(r)
 }
@@ -390,11 +437,11 @@ miss = "A shorter battery life until an update"
     #[test]
     fn counts_red_amber_green() {
         let bf = board();
-        let states: Vec<State> = bf.requirements.iter().map(requirement_state).collect();
+        let states: Vec<State> = bf.requirements.iter().map(|q| requirement_state(q, &Scenarios::new())).collect();
         assert_eq!(states, [State::Green, State::Amber, State::Red]);
         let states: Vec<State> = bf.risks.iter().map(risk_state).collect();
         assert_eq!(states, [State::Red, State::Amber, State::Amber, State::Green]);
-        let r = assess(Some(&bf));
+        let r = assess(Some(&bf), None);
         assert_eq!(
             r.red,
             ["R3 (Lasts a week): nothing shows yet that it is met.", "Microphone pinout: a miss would need a new board, and it hasn't been accepted."]
@@ -412,31 +459,56 @@ miss = "A shorter battery life until an update"
         let done = BOARD
             .replace("check = \"Datasheet checker\"", "accepted = \"Go ahead with the microphone pinout\"")
             .replace("text = \"Lasts a week\"\ncovered_by = [\"part:U1\"]\n", "text = \"Lasts a week\"\ncovered_by = [\"part:U1\"]\n[[requirement.proof]]\nhow = \"devboard\"\nevidence = \"42 µA measured\"\n");
-        let r = assess(Some(&crate::boardfile::parse(&done).unwrap()));
+        let r = assess(Some(&crate::boardfile::parse(&done).unwrap()), None);
         assert_eq!((r.red.len(), r.amber, r.green, r.verdict().as_str()), (0, 4, 3, "Ready to freeze"));
         assert!(r.summary_chip().contains("chip ok\">Readiness: ready"));
         // a blank acceptance accepts nothing
         let blank = crate::boardfile::parse(&done.replace("\"Go ahead with the microphone pinout\"", "\" \"")).unwrap();
-        assert_eq!(assess(Some(&blank)).verdict(), "1 thing blocks freeze");
+        assert_eq!(assess(Some(&blank), None).verdict(), "1 thing blocks freeze");
+    }
+
+    #[test]
+    fn scenario_proofs_follow_their_result() {
+        let toml = BOARD.replace("evidence = \"QEMU scenario <record>\"", "evidence = \"scenario:record\"");
+        let bf = crate::boardfile::parse(&toml).unwrap();
+        let sim = |ok: bool| json!({"scenarios": [{"scenario": "record", "ok": ok}, {"scenario": "other", "ok": false}]});
+        // passed: as before (R1 green)
+        let r = assess(Some(&bf), Some(&sim(true)));
+        assert_eq!((r.red.len(), r.green), (2, 2), "{r:?}");
+        let h = page(&Circuit::new("t", "T", "A"), Some(&bf), Some(&sim(true)), &r, &[], "d");
+        assert!(h.contains("<span class=\"chip ok\">Simulated</span>Scenario <code>record</code> passed in the last simulation run"), "{h}");
+        // failed, or no result at all: R1 is red and says why
+        for (sim, why, word) in [
+            (Some(sim(false)), "R1 (Records a note): its scenario record failed in the last simulation run.", "Scenario failed"),
+            (Some(json!({"scenarios": []})), "R1 (Records a note): its scenario record has no result (run the sim stage).", "Scenario not run"),
+            (None, "R1 (Records a note): its scenario record has no result (run the sim stage).", "Scenario not run"),
+        ] {
+            let r = assess(Some(&bf), sim.as_ref());
+            assert_eq!(r.red.len(), 3, "{r:?}");
+            assert_eq!(r.red[0], why);
+            assert_eq!(requirement_state(&bf.requirements[0], &scenarios(sim.as_ref())), State::Red);
+            let h = page(&Circuit::new("t", "T", "A"), Some(&bf), sim.as_ref(), &r, &[], "d");
+            assert!(h.contains(&format!("<span class=\"chip bad\">{word}</span>Scenario <code>record</code>")), "{h}");
+        }
     }
 
     #[test]
     fn not_filled_in_is_never_ready() {
         let bare = BOARD.split("[[risk]]").next().unwrap().split("[[requirement.proof]]").next().unwrap();
-        let r = assess(Some(&crate::boardfile::parse(bare).unwrap()));
+        let r = assess(Some(&crate::boardfile::parse(bare).unwrap()), None);
         assert_eq!((r.red.len(), r.amber, r.green, r.filled), (1, 0, 0, false));
         assert!(r.summary_chip().contains("chip warn\">Readiness: not filled in"));
         assert!(r.section().contains("Not filled in yet"));
-        let r = assess(None);
+        let r = assess(None, None);
         assert!(!r.ready() && !r.filled && r.red[0].contains("no board.toml"), "{r:?}");
     }
 
     #[test]
     fn page_text() {
         let bf = board();
-        let r = assess(Some(&bf));
+        let r = assess(Some(&bf), None);
         let c = Circuit::new("t", "Capture clip", "A");
-        let h = page(&c, Some(&bf), &r, &["No <code>round.md</code>.".to_string()], "2026-09-30");
+        let h = page(&c, Some(&bf), None, &r, &["No <code>round.md</code>.".to_string()], "2026-09-30");
         assert!(h.starts_with("<title>Capture clip readiness</title>\n"), "{}", &h[..60]);
         for want in [
             "<p class=\"verdict bad\">2 things block freeze</p>",
@@ -465,7 +537,7 @@ miss = "A shorter battery life until an update"
         assert!(at("Would need a new board") < at("Fixable on the delivered board") && at("Fixable on the delivered board") < at("Fixable by a firmware update"));
         // nothing red: the verdict changes and the blockers' section goes
         let ok = Readiness { red: vec![], amber: 1, green: 2, filled: true };
-        let h = page(&c, Some(&bf), &ok, &[], "2026-09-30");
+        let h = page(&c, Some(&bf), None, &ok, &[], "2026-09-30");
         assert!(h.contains("<p class=\"verdict ok\">Ready to freeze</p>") && !h.contains("What blocks freeze"), "{h}");
         assert!(ok.section().contains("review/readiness.html"));
     }
