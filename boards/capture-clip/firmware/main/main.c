@@ -3,6 +3,7 @@
 // clip (state machine, queue, upload) and capture (the Capture client). The state machine
 // decides; this loop feeds it events and carries out what it returns.
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
@@ -14,6 +15,7 @@
 #include "esp_heap_caps.h"
 #include "esp_random.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -21,7 +23,14 @@
 #include "provision.h"
 
 #define TICK_MS 20
-#define DEBOUNCE_TICKS 2
+#define BUTTON_SAMPLE_MS 10
+// Who goes first. The loop that feeds the state machine is above the two tasks that work for
+// seconds at a time: below them (it was at 1, where app_main starts) a press was acted on only
+// when they paused, and the recording it starts would lose its first words. It only does short
+// things while a recording runs. The simulators' console is above it: SIM lines are the pins.
+#define PRIO_LOOP 7
+#define PRIO_WORKER 5 // the recorder is at 6 (recorder.c): sound is never kept waiting by an upload
+#define PRIO_CONSOLE (BOARD_IS_REAL ? 4 : 8)
 #define BATTERY_EVERY_MS 30000
 // From the button going down to app_main after a deep-sleep wake (INFERRED 100-250 ms,
 // research/2026-09-29-esp32-firmware.md §8; Phase D.5 measures it). The press is dated back by
@@ -51,9 +60,16 @@ typedef struct {
 
 typedef enum { JOB_WIFI_ON, JOB_WIFI_OFF, JOB_UPLOAD, JOB_UPDATE, JOB_CHARGE_FAST } job_t;
 
-static QueueHandle_t inbox, jobs;
+typedef struct {
+    bool down;
+    int64_t at_ms;
+} edge_t;
+
+static QueueHandle_t inbox, jobs, edges;
 static TaskHandle_t main_task, worker_task;
-static volatile bool worker_busy;
+// Jobs given and not yet finished. Counted, not a flag: the loop gives while the worker finishes.
+static atomic_int jobs_open;
+#define worker_busy (atomic_load(&jobs_open) > 0)
 static clip_meta_t recording; // the recording in progress
 static bool recording_open;
 static int rest_mv;           // the cell, last read with Wi-Fi off
@@ -277,13 +293,13 @@ static void worker(void *arg)
             }
             break;
         }
-        worker_busy = uxQueueMessagesWaiting(jobs) > 0;
+        atomic_fetch_sub(&jobs_open, 1);
     }
 }
 
 static void give(job_t job)
 {
-    worker_busy = true;
+    atomic_fetch_add(&jobs_open, 1);
     xQueueSend(jobs, &job, portMAX_DELAY);
 }
 
@@ -343,11 +359,11 @@ static void say_state(void)
         keep.sm.charge_fast ? "true" : "false");
 }
 
-static void step(const clip_event_t *event)
+static void step_at(const clip_event_t *event, int64_t at_ms)
 {
     clip_state_t state = keep.sm.state;
     clip_led_t led = keep.sm.led;
-    clip_output_t out = clip_sm_step(&keep.sm, event, hw_uptime_ms());
+    clip_output_t out = clip_sm_step(&keep.sm, event, at_ms);
     unsigned a = out.actions;
     if (a & CLIP_DO_RECORD_STOP) {
         record_close();
@@ -388,6 +404,63 @@ static void step(const clip_event_t *event)
     }
     if (keep.sm.state != state || keep.sm.led != led) {
         say_state();
+    }
+}
+
+static void step(const clip_event_t *event)
+{
+    step_at(event, hw_uptime_ms());
+}
+
+// ---- the button ----------------------------------------------------------------------------------
+// Sampled from the esp_timer task, which nothing of ours can keep waiting, so an edge gets the
+// time it happened even when the loop is late: a short press is then never taken for a hold.
+// (Only a flash write holds the timer task up, for one erase at most.)
+
+static clip_button_t debounce;
+static esp_timer_handle_t sampler;
+static volatile bool edges_lost;
+
+static void sample_button(void *arg)
+{
+    (void)arg;
+    edge_t edge;
+    if (clip_button_sample(&debounce, hw_button(), hw_uptime_ms(), &edge.at_ms)) {
+        edge.down = debounce.down;
+        if (xQueueSend(edges, &edge, 0) != pdTRUE) {
+            edges_lost = true;
+        }
+    }
+}
+
+static void button_watch(bool down)
+{
+    clip_button_init(&debounce, down);
+    xQueueReset(edges);
+    edges_lost = false;
+    esp_timer_start_periodic(sampler, BUTTON_SAMPLE_MS * 1000);
+}
+
+static void button_unwatch(void)
+{
+    esp_timer_stop(sampler);
+}
+
+// The edges since the last look, each at its own time. *down is the level the state machine has.
+static void button_events(bool *down)
+{
+    edge_t edge;
+    while (xQueueReceive(edges, &edge, 0) == pdTRUE) {
+        *down = edge.down;
+        step_at(&(clip_event_t){.kind = edge.down ? CLIP_EV_BUTTON_DOWN : CLIP_EV_BUTTON_UP}, edge.at_ms);
+    }
+    if (edges_lost) {
+        // more edges than the queue holds while the loop was away: go by the pin as it is now
+        edges_lost = false;
+        if (debounce.down != *down) {
+            *down = !*down;
+            step(&(clip_event_t){.kind = *down ? CLIP_EV_BUTTON_DOWN : CLIP_EV_BUTTON_UP});
+        }
     }
 }
 
@@ -436,6 +509,8 @@ static void console(void *arg)
 static void awake(hw_wake_t wake, int64_t entry_ms)
 {
     clip_event_t event;
+    // from the first moment: a press while the queue is still being read is kept, with its time
+    button_watch(wake == HW_WAKE_BUTTON);
     bool fresh = wake == HW_WAKE_RESET || keep.magic != KEEP_MAGIC;
     if (fresh) {
         clip_recovery_t recovered = {0};
@@ -455,7 +530,7 @@ static void awake(hw_wake_t wake, int64_t entry_ms)
         clip_sm_wake(&keep.sm);
     }
     bool usb = hw_usb(), button = wake == HW_WAKE_BUTTON;
-    int stable = 0;
+    bool selftest_wanted = false;
     int64_t battery_at = hw_uptime_ms();
     hw_usb_present(usb);
     rest_mv = hw_battery_mv();
@@ -477,6 +552,10 @@ static void awake(hw_wake_t wake, int64_t entry_ms)
     sleep_now = false;
     while (!sleep_now) {
         msg_t msg;
+        button_events(&button);
+        if (sleep_now) {
+            break;
+        }
         if (xQueueReceive(inbox, &msg, pdMS_TO_TICKS(TICK_MS)) == pdTRUE) {
             if (msg.kind == MSG_EVENT) {
                 step(&msg.event);
@@ -487,24 +566,24 @@ static void awake(hw_wake_t wake, int64_t entry_ms)
                 record_close();
                 queue_event(&event, CLIP_EV_RECORD_FAILED);
                 step(&event);
-            } else if (msg.kind == MSG_SELFTEST && keep.sm.state == CLIP_IDLE && !worker_busy) {
-                selftests_run(); // its Wi-Fi test took the charger to the slow rate
-                hw_init();
-                hw_usb_present(hw_usb());
-                if (want_fast) {
-                    give(JOB_CHARGE_FAST);
-                }
+            } else if (msg.kind == MSG_SELFTEST) {
+                selftest_wanted = true; // run when nothing else is going on, not dropped
             }
             continue;
         }
-        // the pins
-        bool down = hw_button();
-        stable = down == button ? 0 : stable + 1;
-        if (stable >= DEBOUNCE_TICKS) {
-            button = down;
-            stable = 0;
-            step(&(clip_event_t){.kind = down ? CLIP_EV_BUTTON_DOWN : CLIP_EV_BUTTON_UP});
+        if (selftest_wanted && keep.sm.state == CLIP_IDLE && !worker_busy) {
+            selftest_wanted = false;
+            button_unwatch(); // the button test reads the pin itself; its press is not a recording
+            selftests_run();  // its Wi-Fi test took the charger to the slow rate
+            hw_init();
+            hw_usb_present(hw_usb());
+            if (want_fast) {
+                give(JOB_CHARGE_FAST);
+            }
+            button = hw_button();
+            button_watch(button);
         }
+        // the other pins
         if (hw_usb() != usb) {
             usb = !usb;
             hw_usb_present(usb);
@@ -530,6 +609,7 @@ static void awake(hw_wake_t wake, int64_t entry_ms)
             step(&(clip_event_t){.kind = CLIP_EV_UPDATE_CHECKED});
         }
     }
+    button_unwatch();
     // to sleep: the radio off and the secrets out of memory first
     while (worker_busy) {
         vTaskDelay(pdMS_TO_TICKS(TICK_MS));
@@ -549,12 +629,15 @@ void app_main(void)
     hw_wake_t wake = hw_wake();
     hw_init();
     main_task = xTaskGetCurrentTaskHandle();
+    vTaskPrioritySet(NULL, PRIO_LOOP);
     inbox = xQueueCreate(16, sizeof(msg_t));
     jobs = xQueueCreate(8, sizeof(job_t));
+    edges = xQueueCreate(16, sizeof(edge_t));
+    esp_timer_create(&(esp_timer_create_args_t){.callback = sample_button, .name = "button"}, &sampler);
     net_on_lost(wifi_lost);
     bool mounted = store_mount();
     parts_ok = recorder_init() && mounted;
-    xTaskCreate(worker, "worker", 12 * 1024, NULL, 5, &worker_task);
+    xTaskCreate(worker, "worker", 12 * 1024, NULL, PRIO_WORKER, &worker_task);
 
     // A reset with someone at the USB console is bring-up: the self-tests, as devctl expects.
     // Not after a deep-sleep wake (every press is one), and not after a restart the firmware
@@ -578,7 +661,7 @@ void app_main(void)
         set_error(text);
     }
     provision_console_init();
-    xTaskCreate(console, "console", 6 * 1024, NULL, 4, NULL);
+    xTaskCreate(console, "console", 6 * 1024, NULL, PRIO_CONSOLE, NULL);
     for (;;) {
         awake(wake, entry_ms);
         wake = hw_sleep(sleep_wake_after_ms); // on the board: no return, the wake is a restart

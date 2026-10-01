@@ -6,7 +6,74 @@ made, no secret was used. No QEMU or mock-server process is left running.
 **The tree builds:** QEMU target, real target and the two update images built cleanly after the
 last source change; the Wokwi target was never built. Laptop tests: 238 pass.
 
-## Done and verified
+## Repeatability session, 2026-09-30 afternoon (in progress; supersedes what is below where they differ)
+
+**Step 1, baseline, old firmware, `flock <lock> sim/run.py --no-build` x3, no other QEMU running:**
+
+| Run | Passed | Failed |
+|---|---|---|
+| 1 | 5 of 8 | press (second press never acted on, 14 s), update and rollback (firmware panic, below) |
+| 2 | 7 of 8 | selftest (second `SELFTEST` never ran, 60 s) |
+| 3 | 6 of 8 | low_battery (a 206 ms press taken for a hold), update (firmware panic) |
+
+So it was never only update and rollback: every scenario with a recording can fail. The laptop was
+busy the whole time with things this session does not own (load average 15-17 on 16 cores, 9 GB in
+swap: a Java process at 400 % and a headless browser), which is what makes QEMU slow enough to
+show these. Four separate causes were found in the logs:
+
+1. **The loop that reads the button is starved (VERIFIED in the logs; a real fault on the board).**
+   It ran at priority 1, pinned to core 0. When the recorder (6) or worker (5) is busy on core 0,
+   the loop does not run, even with core 1 idle (ESP-IDF does not move a pinned task). Seen as:
+   `SIM OK BUTTON 1 @15645`, `BUTTON 0 @15851`, state `pressed` only at 17064, `addition` at 17314
+   (low_battery, run 3); and a second press that is never acted on while the recorder cannot keep
+   up with real time (press, run 1).
+2. **A queued self-test was silently dropped** when it arrived while the worker still had the
+   "fast charge" job of the one before (VERIFIED by reading `main.c`; selftest, run 2). The
+   `worker_busy` flag was also set by two tasks without a lock.
+3. **The firmware panics in the Ethernet stand-in's driver**: `LoadStorePIFAddrError`, core 1,
+   `emac_opencores_receive` (esp_eth_mac_openeth.c:271) reading its receive descriptor at
+   0x600cd408, while core 0 is mapping or writing flash (update and rollback run 1, update run 3).
+   The address is valid and is read on every frame, so this is QEMU failing the read (INFERRED: its
+   two emulated cores run as two host threads and the device model is not safe for that). Not the
+   board's code: the real build has no OpenETH.
+4. **Press length depended on the script's timing**: `BUTTON 1`, a 200 ms host sleep, `BUTTON 0`.
+
+**Step 2, what was changed:**
+- `firmware/components/clip/clip_button.c` (new, in `clip.h`): debounce that dates each edge at the
+  moment the pin first moved (`CLIP_DEBOUNCE_MS 30`). Laptop test `firmware/test/test_clip_button.c`
+  (6 tests, one replays the 220 ms press with a loop 5 s late). `scripts/fw-test.sh --gcc`: 244 pass.
+- `main/main.c`: the pin is sampled every 10 ms from the esp_timer task (nothing of ours can hold
+  that up; only a flash write can, for one erase), edges go into a queue with their time, and the
+  loop gives them to the state machine with that time, before anything else. The sampler starts at
+  the top of every wake, so a press during the first part of a USB wake is kept. The loop now runs
+  at priority 7 (recorder 6, worker 5): a press starts and stops the recording at once. The
+  simulators' console is at 8. `worker_busy` is a count of open jobs (atomic). A `SELFTEST` that
+  arrives while something is going on waits instead of vanishing.
+- `main/hw_stub.c`: `SIM PRESS <ms>`: down now, up `<ms>` later by the firmware's clock.
+- `sim/run.py`: presses use `SIM PRESS`; a firmware panic's register dump and backtrace go into
+  the log; on a timeout `STATUS` is asked and logged; `CLIP_QEMU_EXTRA` (env) adds QEMU flags.
+
+**Step 3, no crash notices (done):** `sim/run.py` starts every QEMU with `LD_PRELOAD` set to what
+`scripts/nodump.sh` prints (`qemu_env()`), in the QEMU child's environment only: not the script's
+own, not the mock server (which is a thread of the script). If `nodump.sh` fails, one warning line
+is printed and QEMU runs without it. QEMU's exit status is unchanged (−11 is still seen and counted).
+
+**Step 4, the two QEMU host crashes of today, from their recorded dumps (`coredumpctl info <pid>`):**
+both happened in the first boot of a scenario, within 10 ms of the log line `esp_littlefs: mount
+failed, (-84). formatting...` (the blank image's storage being formatted: flash erases and cache
+remaps on one core while the other runs), and **neither is the `psram_quad_read` crash of
+HARDWARE_LESSONS**:
+- 12:51:10, pid 947683, scenario rollback (`rollback.log.crash1`): `tb_tc_cmp ← q_tree_find_node ←
+  q_tree_lookup_node ← tcg_tb_lookup ← cpu_io_recompile ← io_prepare ← do_ld_4 ← helper_ldul_mmu`:
+  QEMU looking up its translated block after a guest device read.
+- 12:53:55, pid 962683, scenario update by its log's name (`update.log.crash1`): in libc's
+  `realloc ← g_realloc ← g_hash_table_resize ← g_hash_table_insert ← tcg_constant_internal ←
+  fold_shift ← tcg_gen_code` on one emulated core's thread, while the other core's thread was in
+  `esp32s3_write_mmu_value → blk_pread` (the flash cache being remapped). Two host threads in
+  QEMU's translator and flash-mapping code at once.
+  (The task brief had both in rollback with the first backtrace; the dumps say the above.)
+
+## Done and verified (morning session)
 
 | What | Command | Result |
 |---|---|---|
@@ -73,7 +140,7 @@ Low-water marks seen in QEMU (bytes free, the least over all scenarios; QEMU, `-
      b. Task priorities: the main loop, which samples the button, runs at priority 1, below the worker (5) and the recorder (6). A busy worker can starve it, and a press then reads as a hold. **This one would also be a real fault on the board.**
      c. QEMU stalling the guest while flash is written.
    - Three earlier failures of these two scenarios were races in the scenario script (pressing before the app's loop ran); those are fixed.
-2. **QEMU itself died twice in 22 update/rollback runs** (once with exit −11 during an update download; the first time the exit code was not captured). Probably the known QEMU 9.2.2 flash/PSRAM crash (HARDWARE_LESSONS), INFERRED; not reproduced on demand.
+2. **QEMU itself died twice in 22 update/rollback runs** (once with exit −11 during an update download; the first time the exit code was not captured). **Corrected:** not the `psram_quad_read` crash of HARDWARE_LESSONS. The two crashes of the afternoon have backtraces in QEMU's translated-block lookup and code generator (top of this file, step 4); the morning's two left no backtrace that was read.
 3. **Button events are dated when the loop processes them, not when they happen** (except the wake press). Any stall of the main loop turns a press into a hold. Related to 1b.
 4. **A real bug found by the scenarios and fixed:** the fast charge was switched on in the main loop while the radio-off job was still queued in the worker. It now goes through the worker, after the radio is off; `low_battery` checks it from the `PIN` lines.
 5. `status` file on flash has no CRC (a torn write reads as "no report yet", which only costs one extra commit).
@@ -89,7 +156,7 @@ Low-water marks seen in QEMU (bytes free, the least over all scenarios; QEMU, `-
 - `WAKE_BOOT_MS 150`; mic gain shift 14; mic settle 50 ms; I2S pins come back as plain GPIO after `i2s_del_channel`.
 - Self-tests run at boot only after a non-software reset with USB present (so `devctl selftest` works unchanged); on a cold boot on a charger nobody presses the button and that test fails after 10 s, with no other effect.
 - Update manifest format and hosting (`update_url` key, `key=value` text; a GitHub API URL gets the token and the raw media type).
-- QEMU's segfault is the known flash/PSRAM bug.
+- ~~QEMU's segfault is the known flash/PSRAM bug.~~ Wrong: see step 4 at the top (backtraces read).
 
 ## Needed from pcbgen and board.toml (not edited)
 - `sim.rs`: run `firmware/sim/run.py` when it exists and put `build-qemu/scenarios.json` into `sim.json` (and the review page); or at least pass `-nic user,model=open_eth`.
@@ -111,7 +178,7 @@ Low-water marks seen in QEMU (bytes free, the least over all scenarios; QEMU, `-
 
 ## Proposed HARDWARE_LESSONS.md entries (not written; each verified in QEMU 2026-09-30 unless marked)
 - **QEMU's OpenCores Ethernet works on the esp32s3 machine:** `CONFIG_ETH_USE_OPENETH=y`, `esp_eth_mac_new_openeth` + `esp_eth_phy_new_generic`, QEMU flag `-nic user,model=open_eth`; DHCP gives 10.0.2.15 and the host is 10.0.2.2. Three "mac filter not supported" error lines at start are harmless.
-- **OTA works in QEMU** (`esp_ota_begin/write/end`, `set_boot_partition`, trial boot, `mark_app_invalid_rollback_and_reboot`) on an image that already carries the otadata entry. QEMU itself died in 2 of 22 update runs (one with exit −11, one exit code not captured; INFERRED: the known flash/PSRAM crash).
+- **OTA works in QEMU** (`esp_ota_begin/write/end`, `set_boot_partition`, trial boot, `mark_app_invalid_rollback_and_reboot`) on an image that already carries the otadata entry. (QEMU's own crashes: see the entries proposed at the top of this file.)
 - **`esp_http_client_read` also fires `HTTP_EVENT_ON_DATA`:** a request made with `open`/`write`/`fetch_headers`/`read` that also collects in the event handler gets every body byte twice.
 - **Component `REQUIRES` can't depend on `CONFIG_*`:** requirements are read before the configuration exists; list them all and make only `SRCS` conditional.
 - **`joltwallet/littlefs` 1.22.3 builds on IDF v6.1;** a blank partition logs "Corrupted dir pair" once and formats.

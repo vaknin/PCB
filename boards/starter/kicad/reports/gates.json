@@ -1,0 +1,9 @@
+{
+  "date": "2026-09-30",
+  "netlist": true,
+  "netclasses": true,
+  "board_toml": true,
+  "erc": true,
+  "drc": true,
+  "routing": true
+}

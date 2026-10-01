@@ -94,6 +94,32 @@ def qemu_binary():
     return found[-1]
 
 
+_preload = []
+
+
+def qemu_env():
+    """The QEMU child's environment: ours, plus the preload that makes it non-dumpable
+    (scripts/nodump.sh), so a simulator crash leaves no core dump and raises no desktop crash
+    notice. Its exit status is unchanged. Only QEMU gets it: not this script, not the mock server."""
+    if not _preload:
+        script = FW.parents[2] / "scripts" / "nodump.sh"
+        try:
+            out = subprocess.run([str(script)], capture_output=True, text=True, timeout=60)
+            path = out.stdout.strip().splitlines()[-1] if out.returncode == 0 and out.stdout.strip() else ""
+            why = out.stderr.strip() or "exit %d, no path" % out.returncode
+        except (OSError, subprocess.TimeoutExpired) as e:
+            path, why = "", str(e)
+        if not path or not Path(path).is_file():
+            print("   warning: %s failed (%s); QEMU runs without it, a QEMU crash will leave a core dump" % (script, why),
+                  flush=True)
+            path = ""
+        _preload.append(path)
+    env = dict(os.environ)
+    if _preload[0]:
+        env["LD_PRELOAD"] = " ".join(filter(None, [_preload[0], env.get("LD_PRELOAD", "")]))
+    return env
+
+
 class Clip:
     """One QEMU run on a flash image. Lines are read in a thread; every wait has a deadline."""
 
@@ -102,9 +128,11 @@ class Clip:
         self.lines, self.cursor, self.inbox = [], 0, queue.Queue()
         args = [str(qemu_binary()), "-M", "esp32s3", "-m", "8M", "-drive", "file=%s,if=mtd,format=raw" % image,
                 "-global", "driver=ssi_psram,property=is_octal,value=true", "-nographic", "-serial", "mon:stdio"]
+        args += os.environ.get("CLIP_QEMU_EXTRA", "").split()
         if network:
             args += ["-nic", "user,model=open_eth"]
-        self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     env=qemu_env())
         threading.Thread(target=self._read, daemon=True).start()
         self.log = open(log, "a")
         self.log.write("==== QEMU start\n")
@@ -138,9 +166,13 @@ class Clip:
                 if regex.search(line):
                     return line
                 if not crash_ok and ("Guru Meditation" in line or line.startswith("abort()")):
+                    self.drain(2)  # the registers and the backtrace into the log
                     raise Failed("the firmware crashed while waiting for /%s/: %s" % (pattern, line))
             left = deadline - time.time()
             if left <= 0:
+                if self.proc.poll() is None:  # what the firmware says of itself, into the log
+                    self.send("STATUS")
+                    self.drain(1)
                 raise Failed("timed out after %d s waiting for /%s/ (log: %s)" % (timeout, pattern, self.log_path))
             self._pump(min(left, 0.5))
 
@@ -200,9 +232,9 @@ class Clip:
 
     # ---- what a finger does ----
     def press(self, ms=200):
-        self.sim("BUTTON 1")
+        # timed by the firmware's clock, not by when this script's next line gets through
+        self.sim("PRESS %d" % ms)
         time.sleep(ms / 1000)
-        self.sim("BUTTON 0")
 
     def record(self, seconds, hold=False):
         """Press (or hold), speak for `seconds`, press again."""
@@ -614,7 +646,7 @@ def main():
             try:
                 evidence, ok = SCENARIOS[name](world), True
             except SimulatorDied as e:
-                # Espressif's QEMU sometimes segfaults while flash is written (HARDWARE_LESSONS);
+                # Espressif's QEMU sometimes segfaults (in its translator, while the guest maps or writes flash);
                 # that is the simulator, not the firmware: the scenario is run again, and it is said.
                 crashes += 1
                 world.close()

@@ -1,5 +1,7 @@
 // QEMU has no GPIO or ADC: the pins are variables here, set by `SIM` console lines from the
 // scenario script (sim/run.py) and shown as `PIN` lines, so a scenario can check them.
+//   SIM PRESS <ms> (down now, up <ms> later by the firmware's own clock, so a press is as long
+//   as it says however late the next line arrives)
 //   SIM BUTTON 0|1    SIM USB 0|1    SIM CHRG 0|1    SIM BATTERY <mV at rest>
 //   SIM LOADED <mV with Wi-Fi up, 0 = as at rest>    SIM NET 0|1 (1: the network can be reached)
 //   SIM SKIP <ms> (the clocks jump, as in a sleep)   SIM TIMER (asleep: the timer wake is now)
@@ -20,6 +22,7 @@ static struct {
     uint8_t led;
     bool fast, mic, stdby_pull;
     bool held;
+    int64_t release_ms; // SIM PRESS: the button goes up by itself then; 0 = no
 } pins = {.battery_mv = 3900};
 
 // The same sequences as on the board, against the variables: what they end in is shown.
@@ -86,6 +89,11 @@ void hw_init(void)
 
 bool hw_button(void)
 {
+    int64_t release = pins.release_ms;
+    if (release && hw_uptime_ms() >= release) {
+        pins.release_ms = 0;
+        pins.button = false;
+    }
     return pins.button;
 }
 
@@ -145,7 +153,11 @@ bool hw_sim_command(const char *line)
     }
     int got = sscanf(line + 4, "%11s %ld", what, &value);
     if (got == 2 && strcmp(what, "BUTTON") == 0) {
+        pins.release_ms = 0;
         pins.button = value;
+    } else if (got == 2 && strcmp(what, "PRESS") == 0 && value > 0) {
+        pins.release_ms = hw_uptime_ms() + value;
+        pins.button = true;
     } else if (got == 2 && strcmp(what, "USB") == 0) {
         pins.usb = value;
     } else if (got == 2 && strcmp(what, "CHRG") == 0) {

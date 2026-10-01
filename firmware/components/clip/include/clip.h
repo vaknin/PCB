@@ -94,6 +94,25 @@ extern const clip_led_pattern_t clip_led_patterns[CLIP_LED_COUNT];
 uint8_t clip_led_colour(clip_led_t led, int64_t t_ms);
 bool clip_led_over(clip_led_t led, int64_t t_ms);
 
+// ---- the button ------------------------------------------------------------------------------------
+
+// The button's pin, sampled every few ms by something that is never kept waiting (a timer, not
+// the app's loop), becomes presses and releases with the time they happened. The app's loop may
+// be late; a short press must still not look like a hold.
+#define CLIP_DEBOUNCE_MS 30
+
+typedef struct {
+    bool down;         // the debounced level
+    bool changing;     // the pin differs from it since since_ms
+    int64_t since_ms;
+} clip_button_t;
+
+void clip_button_init(clip_button_t *button, bool down);
+// One sample of the pin. True when the debounced level changed (it is in button->down): the pin
+// has been at the new level for CLIP_DEBOUNCE_MS, and *at_ms is when it was first seen there,
+// the time to give clip_sm_step with the event.
+bool clip_button_sample(clip_button_t *button, bool down, int64_t now_ms, int64_t *at_ms);
+
 // ---- the state machine ----------------------------------------------------------------------------
 
 #define CLIP_HOLD_MS 1000
