@@ -854,23 +854,46 @@ pub fn parse(text: &str) -> Result<BoardFile> {
     Ok(toml::from_str(text)?)
 }
 
-/// The GPIO number behind a module pin name, for the modules pcbgen knows.
-/// ESP32-S3-WROOM-1: `IOnn` is GPIOnn; TXD0/RXD0 are GPIO43/44 (Espressif WROOM-1
-/// datasheet v1.8, Table 3-1); USB_D-/USB_D+ are GPIO19/20 (the KiCad symbol's alternate
-/// names IO19/IO20). Other pins (EN, 3V3, GND) are not GPIOs.
+/// A module pcbgen has a GPIO table for: which symbols it is, and how their pin names map
+/// to GPIO numbers.
+struct Module {
+    /// The symbol's lib id starts with this. `MODULES` is searched in order, so a longer
+    /// prefix goes before a shorter one it extends.
+    lib_id_prefix: &'static str,
+    /// Pins whose name doesn't say their GPIO number.
+    special: &'static [(&'static str, u32)],
+    /// Other pins named `<io_prefix><n>` are GPIO n; the rest (EN, 3V3, GND) are not GPIOs.
+    io_prefix: &'static str,
+}
+
+/// ESP32-S3-WROOM-1 and -1U: `IOnn` is GPIOnn; TXD0/RXD0 are GPIO43/44 (Espressif
+/// WROOM-1/WROOM-1U datasheet v1.8, Table 3-1; one document for both); USB_D-/USB_D+ are
+/// GPIO19/20 (the KiCad symbol's alternate names IO19/IO20).
+const WROOM1_SPECIAL: &[(&str, u32)] = &[("TXD0", 43), ("RXD0", 44), ("USB_D-", 19), ("USB_D+", 20)];
+
+const MODULES: &[Module] = &[
+    // KiCad 10 ships a -1U footprint but no -1U symbol, so a -1U board uses the WROOM-1
+    // symbol (its footprint filter takes both) and the next entry; this one is for a
+    // library that names the symbol -1U.
+    Module { lib_id_prefix: "RF_Module:ESP32-S3-WROOM-1U", special: WROOM1_SPECIAL, io_prefix: "IO" },
+    Module { lib_id_prefix: "RF_Module:ESP32-S3-WROOM-1", special: WROOM1_SPECIAL, io_prefix: "IO" },
+];
+
+fn module_of(lib_id: &str) -> Option<&'static Module> {
+    MODULES.iter().find(|m| lib_id.starts_with(m.lib_id_prefix))
+}
+
+/// The GPIO number behind a module pin name, for the modules in `MODULES`.
 fn gpio_of(lib_id: &str, pin: &str) -> Option<u32> {
-    debug_assert!(knows(lib_id));
-    match pin {
-        "TXD0" => Some(43),
-        "RXD0" => Some(44),
-        "USB_D-" => Some(19),
-        "USB_D+" => Some(20),
-        _ => pin.strip_prefix("IO").filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())).and_then(|n| n.parse().ok()),
+    let m = module_of(lib_id)?;
+    if let Some(&(_, g)) = m.special.iter().find(|(name, _)| *name == pin) {
+        return Some(g);
     }
+    pin.strip_prefix(m.io_prefix).filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())).and_then(|n| n.parse().ok())
 }
 
 fn knows(lib_id: &str) -> bool {
-    lib_id.starts_with("RF_Module:ESP32-S3-WROOM-1")
+    module_of(lib_id).is_some()
 }
 
 /// Problems between `board.toml`, the circuit and the spec's requirement IDs
@@ -1761,6 +1784,30 @@ miss = "A dim light; one resistor swapped"
         for not in ["EN", "3V3", "GND", "IO", "IOx1"] {
             assert_eq!(gpio_of(m, not), None, "{not}");
         }
+    }
+
+    #[test]
+    fn module_table() {
+        // -1U: its own entry, and the WROOM-1 symbol it uses with KiCad 10's libraries
+        for m in ["RF_Module:ESP32-S3-WROOM-1U", "RF_Module:ESP32-S3-WROOM-1"] {
+            assert!(knows(m), "{m}");
+            assert_eq!(gpio_of(m, "TXD0"), Some(43), "{m}");
+            assert_eq!(gpio_of(m, "IO0"), Some(0), "{m}");
+            assert_eq!(gpio_of(m, "EN"), None, "{m}");
+        }
+        for m in ["RF_Module:ESP32-S3-WROOM-2", "RF_Module:ESP32-S3-MINI-1", "RF_Module:ESP32-WROOM-32"] {
+            assert!(!knows(m), "{m}");
+            assert_eq!(gpio_of(m, "IO0"), None, "{m}");
+        }
+        // every special pin is a pin of KiCad's symbol; its GPIOs are 0-21, 35-48 and the specials
+        let m = "RF_Module:ESP32-S3-WROOM-1";
+        let sym = crate::symlib::load(m).unwrap();
+        for (name, _) in WROOM1_SPECIAL {
+            assert!(sym.pins.iter().any(|p| p.name == *name), "{name}");
+        }
+        let gpios: BTreeSet<u32> = sym.pins.iter().filter_map(|p| gpio_of(m, &p.name)).collect();
+        let want: BTreeSet<u32> = (0..=21).chain(35..=48).collect();
+        assert_eq!(gpios, want);
     }
 
     #[test]
