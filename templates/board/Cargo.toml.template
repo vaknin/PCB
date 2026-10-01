@@ -1,0 +1,10 @@
+[package]
+name = "__NAME__"
+version = "0.1.0"
+description = "__NAME__, Rev 0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pcbgen = { path = "../../crates/pcbgen" }

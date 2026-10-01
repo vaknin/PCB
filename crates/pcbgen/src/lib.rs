@@ -2,6 +2,7 @@
 //! JLCPCB fab files. KiCad files are written directly as S-expressions; kicad-cli does
 //! netlist export, ERC, DRC, zone fill and fab exports. No KiCad library is loaded.
 
+pub mod blocks;
 pub mod board;
 pub mod boardfile;
 pub mod case;
@@ -21,6 +22,7 @@ pub mod readiness;
 pub mod report;
 pub mod review;
 pub mod route;
+pub mod scaffold;
 pub mod schematic;
 pub mod ses;
 pub mod sexpr;
