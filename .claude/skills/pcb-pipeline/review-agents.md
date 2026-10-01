@@ -21,10 +21,9 @@ reviewer and the red team. They are required before freeze and before any order
   VERIFIED / WRONG / UNVERIFIABLE.
 - Have it trace symbol pin → footprint pad → net in the `.kicad_pcb`, so it checks what gets
   soldered, not what the code meant.
-<!-- pending: lands with 2a/2b/2c/2d -->
-- Include every part `lib/IMPORTED.toml` lists as UNVERIFIED (imported with `pcb lib import`);
-  a VERIFIED verdict is what lets it lose that tag.
-<!-- /pending -->
+- Include every part `lib/IMPORTED.toml` lists as UNVERIFIED (imported with `pcb lib import`):
+  pins, pin types and pads against the datasheet. A VERIFIED verdict is what lets it lose
+  that tag: set its status to VERIFIED and fill in checked_by (who, which datasheet page).
 
 ## Blind reviewer
 - Give it the circuit, layout, KiCad files, reports, fab outputs, parts research and

@@ -40,14 +40,15 @@ miss() {
     if [[ $1 == pending ]]; then pending+=("$2: $3"); else missing+=("$2: $3"); fi
 }
 
-# Rust and script sources a prose --flag may come from
-flag_sources=("$cli" "$devctl" "${pcbbin[@]}" "$root"/scripts/*.sh "$root"/scripts/*/*.sh
-              "$root"/boards/*/firmware/sim/run.py)
+# the pcb binary: src/bin/pcb.rs and its command modules in src/bin/pcb/
 if ((${#pcbbin[@]})); then
     mapfile -t pcbfiles < <(find "${pcbbin[@]}" -name '*.rs')
 else
     pcbfiles=()
 fi
+# Rust and script sources a prose --flag may come from
+flag_sources=("$cli" "$devctl" "${pcbfiles[@]}" "$root"/scripts/*.sh "$root"/scripts/*/*.sh
+              "$root"/boards/*/firmware/sim/run.py)
 
 has_flag() { # target, flag
     case $1 in

@@ -1,0 +1,5 @@
+# Symbols and footprints imported with `pcb lib import` (easyeda2kicad) into the `pcbgen`
+# libraries (lib/symbols/pcbgen.kicad_sym, lib/footprints/pcbgen.pretty). Each stays
+# UNVERIFIED, and a red item on the readiness page of every board using it, until a datasheet
+# check confirms its pins and pads: then status = "VERIFIED" and checked_by says who and
+# against which datasheet page.

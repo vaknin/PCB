@@ -17,16 +17,29 @@ committed) is in `docs/pipeline.md` "A board directory". The worked example is
   `crates/pcbgen/src/boardfile.rs`.
 
 ## Parts
-<!-- pending: lands with 2a/2b/2c/2d -->
-- Find parts with `cargo run --release -p pcbgen --bin pcb -- parts search "<what>" [--basic|--no-fee] [--qty N]`
-  (fee-free Basic parts first) and check one with `parts show C123 [--datasheet]`. Use it
-  instead of typing LCSC numbers by hand.
-- Every part needs `.lcsc(..)` and `.mpn(..)`: the `cost` stage fails if a BOM line's LCSC
-  listing has a different MPN, or too little stock.
-- A symbol or footprint KiCad doesn't ship: `cargo run --release -p pcbgen --bin pcb -- lib import C123`
-  (easyeda2kicad: symbol, footprint and 3D model into `lib/`). It is recorded UNVERIFIED in
-  `lib/IMPORTED.toml` until a datasheet check (`review-agents.md`) confirms the pins and pads.
-<!-- /pending -->
+- Find parts with `cargo run --release -p pcbgen --bin pcb -- parts search "<what>"` and copy
+  the LCSC code from its table instead of typing one. Flags: `--basic` (Basic only) or
+  `--no-fee` (Basic + Preferred Extended), `--qty N` (price at N), `--limit N` (rows shown),
+  `--pages N`, `--any-stock` (include parts out of stock), `--fresh` (skip the 1-day cache in
+  `~/.cache/pcbgen/jlc/`). Fee-free parts come first. Its KiCad footprint column is a name
+  match, a hint, never a checked land pattern.
+- Check one part with `cargo run --release -p pcbgen --bin pcb -- parts show C123`
+  (`--datasheet` downloads the PDF and a `pdftotext` copy into the cache).
+- Every assembled part needs `.lcsc(..)` and `.mpn(..)` (the blocks and the template carry
+  them). The `cost` stage's PARTS gate fails when a BOM line's LCSC listing has another MPN
+  (a one-digit LCSC typo moves the price a cent but swaps the part) or too little stock;
+  a line without an MPN only warns for now.
+- A symbol or footprint KiCad doesn't ship: `cargo run --release -p pcbgen --bin pcb -- lib import C123`.
+  It runs easyeda2kicad and adds both to the repo's `pcbgen` libraries (the symbol library in
+  lib/symbols is made by the first import; footprints in `lib/footprints/pcbgen.pretty`) as
+  `pcbgen:<MPN>`, recorded UNVERIFIED in `lib/IMPORTED.toml`. It refuses an LCSC number or a
+  name already there. Then:
+  - Fix what it reports. It warns when pads reach past the courtyard. EasyEDA silk often sits
+    under 0.15 mm from pads, which DRC catches.
+  - Pins come in as `passive`; set real types during the datasheet check.
+  - Add the printed line to `EASYEDA` in `enclosure/models.py` and align that model by hand.
+  - Every board using it has a red readiness item until a datasheet check
+    (`review-agents.md`) sets its status to VERIFIED and fills in checked_by.
 - An Extended (fee-bearing) part, or a fee-free substitute that costs function, is the owner's
   choice (`choice-page.md`). A technical fix that adds one is proposed with its price.
 - Modified footprints go in `lib/footprints/<Lib>.pretty` under a new name.

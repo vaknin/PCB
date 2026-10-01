@@ -54,10 +54,11 @@ that `[[sim.scenario]]` failed or never ran.
 On the owner's "freeze": `scripts/freeze.sh <board>`. It needs a draft-tagged HEAD, a clean
 tree, and a current `review/readiness.json` with nothing red. It tags
 `<board>-rev<X>-freeze`. The case (`case/`) freezes with the board.
-<!-- pending: lands with 2a/2b/2c/2d -->
-Freeze also records the hashes of the footprints and symbols the board uses;
-`scripts/check-frozen.sh` refuses if a KiCad library they come from changed since.
-<!-- /pending -->
+Freeze also stores in the tag the sha256 of every footprint and symbol the board uses, and
+the kicad-cli version (`scripts/lib-hashes.sh`). `scripts/check-frozen.sh` refuses when any of
+them changed since, and lists which: a KiCad update or an edited `lib/` footprint would
+otherwise slip into a regenerated board unseen. `scripts/freeze.sh --dry-run <board>` runs
+every check and shows the tag message without tagging.
 
 ## Before any order
 In this order, every one required:
