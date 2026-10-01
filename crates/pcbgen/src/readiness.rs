@@ -305,9 +305,16 @@ pub fn page(c: &Circuit, bf: Option<&BoardFile>, r: &Readiness, flagged: &[Strin
     h
 }
 
+/// Parts whose symbol or footprint came from `pcb lib import` and are still UNVERIFIED in
+/// `lib/IMPORTED.toml` block freeze: a wrong pin or pad needs a new board.
+fn imported_parts(r: &mut Readiness, c: &Circuit) {
+    r.red.extend(crate::libimport::unverified_risks(c));
+}
+
 /// Writes `<dir>/readiness.html` and `<dir>/readiness.json`; returns the counts for the review page.
 pub fn write(dir: &Path, c: &Circuit, bf: Option<&BoardFile>, flagged: &[String], date: &str) -> Result<Readiness> {
-    let r = assess(bf);
+    let mut r = assess(bf);
+    imported_parts(&mut r, c);
     std::fs::create_dir_all(dir)?;
     std::fs::write(dir.join(PAGE), page(c, bf, &r, flagged, date))?;
     std::fs::write(dir.join(JSON), serde_json::to_string_pretty(&r.json(date))? + "\n")?;

@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Freeze a board revision once the owner says "freeze": tag <board>-rev<revision>-freeze
 # on the draft round the owner reviewed (docs/workflow.md step 4, D-023).
-# usage: scripts/freeze.sh <board>
+# usage: scripts/freeze.sh [--dry-run] <board>
 # The revision comes from boards/<board>/board.toml. HEAD must carry a draft tag, so the
 # frozen version is one the owner has seen. The readiness page (the `review` stage) must be
 # newer than board.toml and show nothing red (docs/workflow.md "Right the first time").
+# The tag's message carries the library manifest (scripts/lib-hashes.sh: the sha256 of every
+# footprint and symbol the board uses, and the kicad-cli version), which check-frozen.sh
+# compares before an order. `--dry-run` runs every check and prints the message, tags nothing.
 # Local tag only.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-board=${1:?usage: scripts/freeze.sh <board>}
+dry=
+[[ ${1:-} == --dry-run ]] && { dry=1; shift; }
+board=${1:?usage: scripts/freeze.sh [--dry-run] <board>}
 toml=boards/$board/board.toml
 [[ -f $toml ]] || { echo "no $toml (copy templates/board.toml)" >&2; exit 1; }
 rev=$(sed -n '/^\[board\]/,/^\[/ s/^revision *= *"\([^"]*\)".*/\1/p' "$toml" | head -1)
@@ -35,5 +40,20 @@ if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
   echo "$tag already exists (at $(git rev-parse --short "$tag^{commit}")); bump [board] revision for a new revision" >&2
   exit 1
 fi
-git tag -a "$tag" -m "$board revision $rev frozen at $draft"
-echo "$tag -> $draft ($(git rev-parse --short HEAD))"
+libs=$(scripts/lib-hashes.sh "$board") || { echo "could not hash the libraries $board uses (scripts/lib-hashes.sh)" >&2; exit 1; }
+if grep -q ' MISSING$' <<<"$libs"; then
+  echo "$board uses library items that can't be found:" >&2
+  grep ' MISSING$' <<<"$libs" | sed 's/^/  /' >&2
+  exit 1
+fi
+msg="$board revision $rev frozen at $draft
+
+libraries (scripts/lib-hashes.sh):
+$libs"
+if [[ -n $dry ]]; then
+  echo "dry run: would tag $tag at $draft ($(git rev-parse --short HEAD)) with:"
+  echo "$msg"
+  exit 0
+fi
+git tag -a "$tag" -m "$msg"
+echo "$tag -> $draft ($(git rev-parse --short HEAD)); $(grep -c '^footprint ' <<<"$libs") footprints and $(grep -c '^symbol ' <<<"$libs") symbols hashed"

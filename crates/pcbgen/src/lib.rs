@@ -17,6 +17,7 @@ pub mod gates;
 pub mod geom;
 pub mod jlc;
 pub mod layout;
+pub mod libimport;
 pub mod pcb;
 pub mod project;
 pub mod readiness;

@@ -4,6 +4,8 @@
 //! Each command lives in its own module under `src/bin/pcb/` and adds one line to
 //! `COMMANDS`, so commands added in parallel merge without conflicts.
 
+#[path = "pcb/lib.rs"]
+mod lib;
 #[path = "pcb/new.rs"]
 mod new;
 #[path = "pcb/parts.rs"]
@@ -17,6 +19,7 @@ use anyhow::Result;
 /// Ok(false) for a clean failure (a check that did not pass).
 type Entry = fn(&[String]) -> Result<bool>;
 const COMMANDS: &[(&str, &str, Entry)] = &[
+    ("lib", "import a part KiCad lacks from EasyEDA (see `pcb lib --help`)", lib::main),
     ("new", "scaffold boards/<name>/ from templates/board/", new::main),
     ("parts", "search JLCPCB's parts and show one part (see `pcb parts --help`)", parts::main),
 ];
