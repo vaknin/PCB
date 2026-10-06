@@ -8,3 +8,8 @@ rust-version = "1.98"
 
 [profile.release]
 debug = "line-tables-only"
+
+# Dependencies build without line tables, like in the other repos, so the compile cache shares
+# them; this workspace's own crates keep them.
+[profile.release.package."*"]
+debug = false
